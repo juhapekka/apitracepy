@@ -32,10 +32,17 @@ import zlib
 
 import json
 import struct
-import specs.stdapi as stdapi
+#from gltrace import GlTracer
+#import specs.stdapi as stdapi, Module, API
 import specs.glapi as glapi
 import specs.glparams as glparams
 from specs.glxapi import glxapi
+from specs.eglapi import eglapi
+
+#from specs.stdapi import Module, API
+#from specs.glapi import glapi
+#from specs.glxapi import glxapi
+
 
 TRACE_VERSION = 5
 
@@ -84,29 +91,41 @@ class cTraceFile:
     def getByte(self):
         rval= ord(self.mem[self.containerPointer])
         self.containerPointer += 1
+        self.fullFilePosition += 1
         if self.containerPointer == len(self.mem):
-            print" ---> !!!!!!!!!!"
-            length = int(struct.unpack('i', self.traceFile.read(4))[0])
-            print length
+            length = int(struct.unpack('I', self.traceFile.read(4))[0])
             self.filePointer += 4
             compressedMem = self.traceFile.read(length)
             self.filePointer += length
-            print self.filePointer
             self.container += 1
             self.mem = snappy.uncompress(compressedMem)
             self.containerPointer = 0
         return rval
 
+    def debug10next(self):
+        stringi = ""
+        for i in range(0, 16):
+            stringi += hex(ord(self.mem[self.containerPointer+i]))
+            stringi += " "
+
+        print stringi
+
     def intReader(self):
         res = 0
         shift = 0
-        for c in range(0, 8):
+        for c in range(0, 32):
             bait = self.getByte()
             res |= (bait&0x7f)<<shift
             shift += 7
             if bait&0x80 == 0:
                 break
         return res
+
+    def floatReader(self,  size,  type):
+        buf = ""
+        for i in range(0, size):
+            buf += chr(self.getByte())
+        return float(struct.unpack(type, buf)[0])
 
     def sintReader(self):
         i = self.getByte()
@@ -163,10 +182,11 @@ class cTraceFile:
 #                    self.sintReader()
 
             io = self.sintReader()
-            if io == 0:
-                rval = 0
-            else:
+            try:
                 rval = lista[io]
+            except KeyError:
+                rval = io
+
             return str(rval)
 
     def bitmaskReader(self):
@@ -186,7 +206,17 @@ class cTraceFile:
             #handle scanning ? trace_parser.cpp:418
 
         value = self.intReader()
-        return str(lista[value])
+        rstring = ""
+        for i in range(0, 31):
+            if value&(1<<i) != 0:
+                if rstring != "":
+                    rstring += "|"
+                try:
+                    rstring += str(lista[1<<i])
+                except KeyError:
+                    rstring +=  str(value&(1<<i))
+
+        return rstring
 
     def structReader(self):
         id = self.intReader()
@@ -210,26 +240,42 @@ class cTraceFile:
 
         return rval
 
+    def readRepr(self):
+        print "!!! REPR !!!"
+        return True
+
+    def readWString(self):
+        print "!!! WSTRING !!!"
+        return True
+
+    def nullPointer(self):
+        print "!!! NULL !!!"
+        return True
 
     def parseValue(self):
-        return {
-            TYPE_NULL: lambda : (None, "TYPE_NULL"),
+#        print hex(self.containerPointer)
+        e = self.getByte()
+        rval = {
+            TYPE_NULL: lambda : ("NULL", "TYPE_NULL"),
             TYPE_FALSE: lambda : (False, "TYPE_FALSE"),
             TYPE_TRUE: lambda : (True, "TYPE_TRUE"),
             TYPE_SINT: lambda : (self.sintReader(), "TYPE_SINT"),
             TYPE_UINT: lambda : (self.intReader(), "TYPE_UINT"),
-            TYPE_FLOAT: lambda : (0.0, "TYPE_FLOAT"),
-            TYPE_DOUBLE: lambda : (0.0, "TYPE_DOUBLE"),
+            TYPE_FLOAT: lambda : (self.floatReader(4, 'f'), "TYPE_FLOAT"),
+            TYPE_DOUBLE: lambda : (self.floatReader(8, 'd'), "TYPE_DOUBLE"),
             TYPE_STRING: lambda : (self.stringReader(), "TYPE_STRING"),
-            TYPE_BLOB: lambda : (True, "TYPE_BLOB"),
+            TYPE_BLOB: lambda : (self.stringReader(), "TYPE_BLOB"),
             TYPE_ENUM: lambda : (self.enumReader(), "TYPE_ENUM"),
             TYPE_BITMASK: lambda : (self.bitmaskReader(), "TYPE_BITMASK"),
             TYPE_ARRAY: lambda : (self.arrayReader(), "TYPE_ARRAY"),
             TYPE_STRUCT: lambda : (self.structReader(), "TYPE_STRUCT"),
-            TYPE_OPAQUE: lambda : (self.intReader(), "TYPE_OPAQUE"),
-            TYPE_REPR: lambda : (True, "TYPE_REPR"),
-            TYPE_WSTRING: lambda : (True, "TYPE_WSTRING")
-        }[self.getByte()]()
+            TYPE_OPAQUE: lambda : (self.intReader(), "TYPE_OPAQUE"),        # pointer
+            TYPE_REPR: lambda : (self.readRepr(), "TYPE_REPR"),
+            TYPE_WSTRING: lambda : (self.readWString(), "TYPE_WSTRING")
+        }[e]()
+#        }[self.getByte()]()
+#        print rval[0],  rval[1]
+        return rval
 
     def getVersion(self, parseString):
         res = self.intReader()
@@ -243,12 +289,14 @@ class cTraceFile:
         self.container = 0
         self.containerPointer = 0
 
+        self.fullFilePosition = 0
+
         self.mem = self.traceFile.read(2)
         self.filePointer += 2
         if self.mem != 'at':
             raise Exception("not snappy file!")
 
-        length = int(struct.unpack('i', self.traceFile.read(4))[0])
+        length = int(struct.unpack('I', self.traceFile.read(4))[0])
         self.filePointer += 4
 
         compressedMem = self.traceFile.read(length)
@@ -295,6 +343,7 @@ class cTraceCall:
         index = self.traceFile.intReader()
         self.paramValues.append(self.traceFile.parseValue())
 
+#eglQuerySurface(dpy = 0x1, surface = 0x80c14c18, attribute = EGL_WIDTH, value = [1366])
     def parseCallDetail(self):
         res = 0
         while True:
@@ -322,8 +371,6 @@ class cTraceCall:
                     self.threadID = 0
 
                 self.parseFunctionsig()
-                if self.name == "glScissor":
-                    print "jere"
                 self.parseCallDetail()
             elif self.event == EVENT_LEAVE:
                 id = self.traceFile.intReader()
@@ -335,17 +382,54 @@ class cTraceCall:
 ##
 # startup
 def main():
-    currentTrace = cTraceFile(sys.argv[1])
+    try:
+        currentTrace = cTraceFile(sys.argv[1])
+    except IOError:
+            print "problem with file ",  sys.argv[1]
+            sys.exit(1)
+
+#    faili = open("/home/jheikkil/workspace/mesamesa/apitracepy/tt.bin",  'wb')
+#    for e in range(0,  1024*1024*14):
+#        tavu = ""
+#        tavu += chr(currentTrace.getByte())
+#        faili.write(tavu)
+#    exit(0)
+
+#    module = Module()
+#    module.mergeModule(glxapi)
+#    module.mergeModule(glapi)
+#    api = API()
+#    api.addModule(module)
+#    tracer = GlxTracer()
+#    tracer.traceApi(api)
+
     print "trace file version ", currentTrace.version
 
+    counter = 0
+    while True:
+        try:
+            call = cTraceCall(currentTrace)
+            call.parseCall()
+            paramlist = "("
+            for i in range(0,  call.paramAmount):
+                if len(call.paramValues[i]) >= i:
+                    if call.paramValues[i][1] == "TYPE_BLOB":
+                        paramlist += "blob"
+                    else:
+                        paramlist += str(call.paramValues[i][0])
+                    if i < call.paramAmount-1:
+                        paramlist += ", "
+            paramlist += ")"
+            print counter,  " ",  call.name,  paramlist
+            if call.returnValue != None:
+                print "----> ",  call.returnValue
+        except:
+            print counter,  " --",  call.name
+            break
 
-    for i in range(0, 1330):
-        call = cTraceCall(currentTrace)
-        call.parseCall()
-        print call.name,  "(", call.paramValues,  ")"
-        if call.returnValue != None:
-            print "----> ",  call.returnValue
-
+        counter += 1
+        if counter == 1242:
+            print " --------> 1242"
         call = None
 
 if __name__ == "__main__":
