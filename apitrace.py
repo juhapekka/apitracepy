@@ -26,7 +26,7 @@
 """
 
 import sys
-
+import copy
 import snappy
 import zlib
 
@@ -87,6 +87,8 @@ TraceBacktraceDetail=( "BACKTRACE_END",
                        "BACKTRACE_OFFSET" )
 
 
+enteredCallStack = [] # things with enter but no leave yet
+
 class cTraceFile:
     def getByte(self):
         rval= ord(self.mem[self.containerPointer])
@@ -146,11 +148,11 @@ class cTraceFile:
         return res
 
     def arrayReader(self):
-            arraylenght = self.intReader()
-            array = []
-            for i in range(0,  arraylenght):
-                array += self.parseValue()
-            return array
+        arraylenght = self.intReader()
+        array = []
+        for i in range(0,  arraylenght):
+            array += self.parseValue()
+        return array
 
     def queryLista(self,  sigs,  id):
         lista = None
@@ -174,12 +176,6 @@ class cTraceFile:
                     lista.append((intti,  stringi))
                 lista = dict(lista)
                 enumSigs.append((id,  lista))
-#            else:
-            #handle scanning ? trace_parser.cpp:381
-#                num_values = self.intReader()
-#                for i in range(0, num_values):
-#                    self.stringReader()
-#                    self.sintReader()
 
             io = self.sintReader()
             try:
@@ -202,8 +198,6 @@ class cTraceFile:
                 lista.append((intti,  stringi))
             lista = dict(lista)
             bitmaskSigs.append((id,  lista))
-#       else:
-            #handle scanning ? trace_parser.cpp:418
 
         value = self.intReader()
         rstring = ""
@@ -231,8 +225,6 @@ class cTraceFile:
                 lista.append((i,  stringi))
             lista = dict(lista)
             structSigs.append((id,  lista))
-#       else:
-            #handle scanning ? trace_parser.cpp:317
 
         rval = []
         for i in lista:
@@ -245,21 +237,17 @@ class cTraceFile:
         return True
 
     def readWString(self):
+        id = self.intReader()
         print "!!! WSTRING !!!"
         return True
 
-    def nullPointer(self):
-        print "!!! NULL !!!"
-        return True
 
     def parseValue(self):
-#        print hex(self.containerPointer)
-        e = self.getByte()
         rval = {
             TYPE_NULL: lambda : ("NULL", "TYPE_NULL"),
             TYPE_FALSE: lambda : (False, "TYPE_FALSE"),
             TYPE_TRUE: lambda : (True, "TYPE_TRUE"),
-            TYPE_SINT: lambda : (self.sintReader(), "TYPE_SINT"),
+            TYPE_SINT: lambda : (-self.intReader(), "TYPE_SINT"),
             TYPE_UINT: lambda : (self.intReader(), "TYPE_UINT"),
             TYPE_FLOAT: lambda : (self.floatReader(4, 'f'), "TYPE_FLOAT"),
             TYPE_DOUBLE: lambda : (self.floatReader(8, 'd'), "TYPE_DOUBLE"),
@@ -272,9 +260,7 @@ class cTraceFile:
             TYPE_OPAQUE: lambda : (self.intReader(), "TYPE_OPAQUE"),        # pointer
             TYPE_REPR: lambda : (self.readRepr(), "TYPE_REPR"),
             TYPE_WSTRING: lambda : (self.readWString(), "TYPE_WSTRING")
-        }[e]()
-#        }[self.getByte()]()
-#        print rval[0],  rval[1]
+        }[self.getByte()]()
         return rval
 
     def getVersion(self, parseString):
@@ -285,6 +271,7 @@ class cTraceFile:
         self.api = "API_UNKNOWN"
         self.traceFile = open(filename, 'rb+')
         self.filePointer = 0
+        self.nextCallNumber = 0
 
         self.container = 0
         self.containerPointer = 0
@@ -310,6 +297,7 @@ class cTraceCall:
     def __init__(self,  trace):
         self.traceFile = trace
         self.returnValue = None
+        self.callNumber = 0
 
     def parseFunctionsig(self):
         self.id = self.traceFile.intReader()
@@ -325,7 +313,6 @@ class cTraceCall:
 
             funSig = (self.name,  self.paramAmount,  self.paramNames)
             functionSigs.append((self.id,  funSig))
-            #lookup callflags? traceparser.cpp:245
 
             if self.traceFile.api == "API_UNKNOWN":
                 if self.name[:3] == "glX" or self.name[:3] == "wgl" or self.name[:3] == "CGL":
@@ -343,7 +330,6 @@ class cTraceCall:
         index = self.traceFile.intReader()
         self.paramValues.append(self.traceFile.parseValue())
 
-#eglQuerySurface(dpy = 0x1, surface = 0x80c14c18, attribute = EGL_WIDTH, value = [1366])
     def parseCallDetail(self):
         res = 0
         while True:
@@ -363,8 +349,10 @@ class cTraceCall:
         self.callReturnValue = None
 
         while True:
-            self.event = self.traceFile.getByte()
-            if self.event == EVENT_ENTER:
+            event = self.traceFile.getByte()
+            if event == EVENT_ENTER:
+                self.callNumber = self.traceFile.nextCallNumber
+                self.traceFile.nextCallNumber = self.traceFile.nextCallNumber+1
                 if self.traceFile.version >= 4:
                     self.threadID = self.traceFile.intReader()
                 else:
@@ -372,12 +360,20 @@ class cTraceCall:
 
                 self.parseFunctionsig()
                 self.parseCallDetail()
-            elif self.event == EVENT_LEAVE:
+
+                enteredCallStack.append(copy.copy(self))
+            elif event == EVENT_LEAVE:
                 id = self.traceFile.intReader()
-                self.parseCallDetail()
-                return
+                for i in range(0, len(enteredCallStack)):
+                    thiscall = enteredCallStack[i]
+                    
+                    if thiscall.callNumber == id:
+                        thiscall.parseCallDetail()
+                        del enteredCallStack[i]
+                        return thiscall
+                raise Exception("not found id",  id)
             else:
-                print "unhandled event ",  self.event
+                print "unhandled event ",  event
 
 ##
 # startup
@@ -388,49 +384,30 @@ def main():
             print "problem with file ",  sys.argv[1]
             sys.exit(1)
 
-#    faili = open("/home/jheikkil/workspace/mesamesa/apitracepy/tt.bin",  'wb')
-#    for e in range(0,  1024*1024*14):
-#        tavu = ""
-#        tavu += chr(currentTrace.getByte())
-#        faili.write(tavu)
-#    exit(0)
-
-#    module = Module()
-#    module.mergeModule(glxapi)
-#    module.mergeModule(glapi)
-#    api = API()
-#    api.addModule(module)
-#    tracer = GlxTracer()
-#    tracer.traceApi(api)
-
     print "trace file version ", currentTrace.version
 
-    counter = 0
     while True:
         try:
             call = cTraceCall(currentTrace)
-            call.parseCall()
+            returnedcall = call.parseCall()
             paramlist = "("
-            for i in range(0,  call.paramAmount):
-                if len(call.paramValues[i]) >= i:
-                    if call.paramValues[i][1] == "TYPE_BLOB":
+            for i in range(0,  returnedcall.paramAmount):
+                if len(returnedcall.paramValues) >= i:
+                    if returnedcall.paramValues[i][1] == "TYPE_BLOB":
                         paramlist += "blob"
                     else:
-                        paramlist += str(call.paramValues[i][0])
-                    if i < call.paramAmount-1:
+                        paramlist += str(returnedcall.paramValues[i][0])
+                    if i < returnedcall.paramAmount-1:
                         paramlist += ", "
             paramlist += ")"
-            print counter,  " ",  call.name,  paramlist
-            if call.returnValue != None:
-                print "----> ",  call.returnValue
+            print "@" + str(returnedcall.threadID) + " " + str(returnedcall.callNumber) + " " + returnedcall.name + paramlist
+            if returnedcall.returnValue != None:
+                print "----> ",  returnedcall.returnValue
         except:
-            print counter,  " --",  call.name
+            print currentTrace.nextCallNumber,  " --",  returnedcall.name
             break
 
-        counter += 1
-        if counter == 1242:
-            print " --------> 1242"
-        call = None
+        returnedcall = None
 
 if __name__ == "__main__":
     main()
