@@ -25,24 +25,17 @@
  ***************************************************************************/
 """
 
-import sys
+#import sys
+import os
 import copy
-import snappy
-import zlib
+try:
+	import snappy
+except:
+	print  ("couldn\'t import snappy, please install python-snappy package\n")
 
-import json
+#import zlib
+
 import struct
-#from gltrace import GlTracer
-#import specs.stdapi as stdapi, Module, API
-import specs.glapi as glapi
-import specs.glparams as glparams
-from specs.glxapi import glxapi
-from specs.eglapi import eglapi
-
-#from specs.stdapi import Module, API
-#from specs.glapi import glapi
-#from specs.glxapi import glxapi
-
 
 TRACE_VERSION = 5
 
@@ -110,7 +103,7 @@ class cTraceFile:
             stringi += hex(ord(self.mem[self.containerPointer+i]))
             stringi += " "
 
-        print stringi
+        print (stringi)
 
     def intReader(self):
         res = 0
@@ -137,7 +130,7 @@ class cTraceFile:
         elif i == TYPE_UINT:
             return rval
         else:
-            print hex(self.containerPointer), "error: unecpected type int ",  i
+            print (hex(self.containerPointer), "error: unecpected type int ",  i)
 
     def stringReader(self):
         stringlenght = self.intReader()
@@ -233,17 +226,17 @@ class cTraceFile:
         return rval
 
     def readRepr(self):
-        print "!!! REPR !!!"
+        print ("!!! REPR !!!")
         return True
 
     def readWString(self):
         id = self.intReader()
-        print "!!! WSTRING !!!"
+        print ("!!! WSTRING !!!")
         return True
 
 
     def parseValue(self):
-        rval = {
+        return {
             TYPE_NULL: lambda : ("NULL", "TYPE_NULL"),
             TYPE_FALSE: lambda : (False, "TYPE_FALSE"),
             TYPE_TRUE: lambda : (True, "TYPE_TRUE"),
@@ -257,21 +250,22 @@ class cTraceFile:
             TYPE_BITMASK: lambda : (self.bitmaskReader(), "TYPE_BITMASK"),
             TYPE_ARRAY: lambda : (self.arrayReader(), "TYPE_ARRAY"),
             TYPE_STRUCT: lambda : (self.structReader(), "TYPE_STRUCT"),
-            TYPE_OPAQUE: lambda : (self.intReader(), "TYPE_OPAQUE"),        # pointer
+            TYPE_OPAQUE: lambda : (self.intReader(), "TYPE_OPAQUE"),  # pointer
             TYPE_REPR: lambda : (self.readRepr(), "TYPE_REPR"),
             TYPE_WSTRING: lambda : (self.readWString(), "TYPE_WSTRING")
         }[self.getByte()]()
-        return rval
 
     def getVersion(self, parseString):
         res = self.intReader()
         self.version = res
 
     def __init__(self,  filename):
+        self.fileName = filename
         self.api = "API_UNKNOWN"
-        self.traceFile = open(filename, 'rb+')
+        self.traceFile = open(self.fileName, 'rb+')
         self.filePointer = 0
         self.nextCallNumber = 0
+        self.lastFrameBreakPos = 0
 
         self.container = 0
         self.containerPointer = 0
@@ -315,11 +309,13 @@ class cTraceCall:
             functionSigs.append((self.id,  funSig))
 
             if self.traceFile.api == "API_UNKNOWN":
-                if self.name[:3] == "glX" or self.name[:3] == "wgl" or self.name[:3] == "CGL":
+                if self.name[:3] == "glX" or self.name[:3] == "wgl" \
+                    or self.name[:3] == "CGL":
                     self.traceFile.api = "API_GL"
                 elif self.name[:3] == "egl":
                     self.traceFile.api = "API_EGL"
-                elif self.name[:6] == "Direct" or self.name[:3] == "D3D" or self.name[:6] == "Create":
+                elif self.name[:6] == "Direct" or self.name[:3] == "D3D" \
+                    or self.name[:6] == "Create":
                     self.traceFile.api = "API_DX"
         else:
             self.name = lista[0]
@@ -342,7 +338,7 @@ class cTraceCall:
             elif byte == CALL_RET:
                 self.returnValue = self.traceFile.parseValue()
             elif byte == CALL_BACKTRACE:
-                print "CALL_BACKTRACE"
+                print ("CALL_BACKTRACE")
 
     def parseCall(self):
         self.paramValues = []
@@ -366,15 +362,243 @@ class cTraceCall:
                 id = self.traceFile.intReader()
                 for i in range(0, len(enteredCallStack)):
                     thiscall = enteredCallStack[i]
-                    
+
                     if thiscall.callNumber == id:
                         thiscall.parseCallDetail()
                         del enteredCallStack[i]
+                        thiscall.setCallFalgs()
                         return thiscall
                 raise Exception("not found id",  id)
             else:
-                print "unhandled event ",  event
+                print ("unhandled event ",  event)
 
+    def setCallFalgs(self):
+        endOfFrame = ["glFrameTerminatorGREMEDY", "glFlush", "glFinish",
+        "glClear", "IDXGIDecodeSwapChain::PresentBuffer",
+        "IDXGISwapChain1::Present", "IDXGISwapChain1::Present1",
+        "IDXGISwapChain2::Present", "IDXGISwapChain2::Present1",
+        "IDXGISwapChain::Present", "IDXGISwapChainDWM::Present",
+        "IDirect3DDevice8::Present", "IDirect3DDevice9::Present",
+        "IDirect3DDevice9Ex::Present", "IDirect3DDevice9Ex::PresentEx",
+        "IDirect3DSwapChain9::Present", "IDirect3DSwapChain9Ex::Present",
+        "eglSwapBuffers", "glXSwapBuffers", "wglSwapBuffers",
+        "wglSwapLayerBuffers", "wglSwapMultipleBuffers"]
+        noEffect = [
+        "CGLGetCurrentContext", "D3DPERF_BeginEvent", "D3DPERF_EndEvent",
+        "D3DPERF_SetMarker", "ID3D10Device1::CheckMultisampleQualityLevels",
+        "ID3D10Device::CheckMultisampleQualityLevels",
+        "ID3D11Device::CheckMultisampleQualityLevels",
+        "ID3DUserDefinedAnnotation::BeginEvent",
+        "ID3DUserDefinedAnnotation::EndEvent",
+        "ID3DUserDefinedAnnotation::SetMarker",
+        "IDirect3D8::CheckDeviceFormat", "IDirect3D8::EnumAdapterModes",
+        "IDirect3D8::GetAdapterModeCount", "IDirect3D8::GetDeviceCaps",
+        "IDirect3D9::CheckDeviceFormat", "IDirect3D9::EnumAdapterModes",
+        "IDirect3D9::GetAdapterModeCount", "IDirect3D9::GetDeviceCaps",
+        "IDirect3D9Ex::CheckDeviceFormat", "IDirect3D9Ex::EnumAdapterModes",
+        "IDirect3D9Ex::GetAdapterModeCount", "IDirect3D9Ex::GetDeviceCaps",
+        "IDirect3DDevice8::GetDeviceCaps", "IDirect3DDevice9::GetDeviceCaps",
+        "IDirect3DDevice9Ex::GetDeviceCaps", "eglGetProcAddress",
+        "eglQueryString", "glAreProgramsResidentNV", "glAreTexturesResident",
+        "glAreTexturesResidentEXT", "glBufferRegionEnabled",
+        "glDebugMessageControl", "glDebugMessageControlARB",
+        "glDebugMessageEnableAMD", "glDebugMessageInsert",
+        "glDebugMessageInsertAMD", "glDebugMessageInsertARB",
+        "glDebugMessageInsertKHR", "glGetActiveAtomicCounterBufferiv",
+        "glGetActiveAttrib", "glGetActiveAttribARB",
+        "glGetActiveSubroutineName", "glGetActiveSubroutineUniformName",
+        "glGetActiveSubroutineUniformiv", "glGetActiveUniform",
+        "glGetActiveUniformARB", "glGetActiveUniformBlockName",
+        "glGetActiveUniformBlockiv", "glGetActiveUniformName",
+        "glGetActiveUniformsiv", "glGetActiveVaryingNV",
+        "glGetArrayObjectfvATI", "glGetArrayObjectivATI",
+        "glGetAttachedObjectsARB", "glGetAttachedShaders",
+        "glGetBooleanIndexedvEXT", "glGetBooleani_v", "glGetBooleanv",
+        "glGetBufferParameteri64v", "glGetBufferParameteriv",
+        "glGetBufferParameterivARB", "glGetBufferParameterui64vNV",
+        "glGetBufferPointerv", "glGetBufferPointervARB", "glGetBufferSubData",
+        "glGetBufferSubDataARB", "glGetClipPlane", "glGetColorTable",
+        "glGetColorTableEXT", "glGetColorTableParameterfv",
+        "glGetColorTableParameterfvEXT", "glGetColorTableParameterfvSGI",
+        "glGetColorTableParameteriv", "glGetColorTableParameterivEXT",
+        "glGetColorTableParameterivSGI", "glGetColorTableSGI",
+        "glGetCombinerInputParameterfvNV", "glGetCombinerInputParameterivNV",
+        "glGetCombinerOutputParameterfvNV", "glGetCombinerOutputParameterivNV",
+        "glGetCombinerStageParameterfvNV", "glGetConvolutionFilterEXT",
+        "glGetConvolutionParameterfv", "glGetConvolutionParameterfvEXT",
+        "glGetConvolutionParameteriv", "glGetConvolutionParameterivEXT",
+        "glGetDetailTexFuncSGIS", "glGetDoubleIndexedvEXT", "glGetDoublei_v",
+        "glGetDoublev", "glGetError", "glGetFenceivNV",
+        "glGetFinalCombinerInputParameterfvNV",
+        "glGetFinalCombinerInputParameterivNV", "glGetFloatIndexedvEXT",
+        "glGetFloati_v", "glGetFloatv", "glGetFogFuncSGIS",
+        "glGetFragDataIndex", "glGetFragmentLightfvSGIX",
+        "glGetFragmentLightivSGIX", "glGetFragmentMaterialfvSGIX",
+        "glGetFragmentMaterialivSGIX", "glGetFramebufferAttachmentParameteriv",
+        "glGetFramebufferAttachmentParameterivEXT",
+        "glGetFramebufferParameteriv", "glGetFramebufferParameterivEXT",
+        "glGetGraphicsResetStatusARB", "glGetHandleARB", "glGetHistogramEXT",
+        "glGetHistogramParameterfv", "glGetHistogramParameterfvEXT",
+        "glGetHistogramParameteriv", "glGetHistogramParameterivEXT",
+        "glGetImageTransformParameterfvHP", "glGetImageTransformParameterivHP",
+        "glGetInfoLogARB", "glGetInstrumentsSGIX", "glGetInteger64i_v",
+        "glGetInteger64v", "glGetIntegerIndexedvEXT", "glGetIntegeri_v",
+        "glGetIntegerui64i_vNV", "glGetIntegerui64vNV", "glGetIntegerv",
+        "glGetInternalformati64v", "glGetInternalformativ",
+        "glGetInvariantBooleanvEXT", "glGetInvariantFloatvEXT",
+        "glGetInvariantIntegervEXT", "glGetLightfv", "glGetLightiv",
+        "glGetListParameterfvSGIX", "glGetListParameterivSGIX",
+        "glGetLocalConstantBooleanvEXT", "glGetLocalConstantFloatvEXT",
+        "glGetLocalConstantIntegervEXT", "glGetMapAttribParameterfvNV",
+        "glGetMapAttribParameterivNV", "glGetMapControlPointsNV",
+        "glGetMapParameterfvNV", "glGetMapParameterivNV", "glGetMapdv",
+        "glGetMapfv", "glGetMapiv", "glGetMaterialfv", "glGetMaterialiv",
+        "glGetMinmaxEXT", "glGetMinmaxParameterfv",
+        "glGetMinmaxParameterfvEXT", "glGetMinmaxParameteriv",
+        "glGetMinmaxParameterivEXT", "glGetMultiTexEnvfvEXT",
+        "glGetMultiTexEnvivEXT", "glGetMultiTexGendvEXT",
+        "glGetMultiTexGenfvEXT", "glGetMultiTexGenivEXT",
+        "glGetMultiTexLevelParameterfvEXT", "glGetMultiTexLevelParameterivEXT",
+        "glGetMultiTexParameterIivEXT", "glGetMultiTexParameterIuivEXT",
+        "glGetMultiTexParameterfvEXT", "glGetMultiTexParameterivEXT",
+        "glGetMultisamplefv", "glGetMultisamplefvNV",
+        "glGetNamedBufferParameterivEXT", "glGetNamedBufferParameterui64vNV",
+        "glGetNamedBufferPointervEXT", "glGetNamedBufferSubDataEXT",
+        "glGetNamedFramebufferAttachmentParameterivEXT",
+        "glGetNamedFramebufferParameterivEXT",
+        "glGetNamedProgramLocalParameterIivEXT",
+        "glGetNamedProgramLocalParameterIuivEXT",
+        "glGetNamedProgramLocalParameterdvEXT",
+        "glGetNamedProgramLocalParameterfvEXT", "glGetNamedProgramStringEXT",
+        "glGetNamedProgramivEXT", "glGetNamedRenderbufferParameterivEXT",
+        "glGetNamedStringARB", "glGetNamedStringivARB",
+        "glGetObjectBufferfvATI", "glGetObjectBufferivATI", "glGetObjectLabel",
+        "glGetObjectParameterfvARB", "glGetObjectParameterivAPPLE",
+        "glGetObjectParameterivARB", "glGetObjectPtrLabel",
+        "glGetOcclusionQueryivNV", "glGetOcclusionQueryuivNV",
+        "glGetPerfMonitorCounterDataAMD", "glGetPerfMonitorCounterInfoAMD",
+        "glGetPerfMonitorCounterStringAMD", "glGetPerfMonitorCountersAMD",
+        "glGetPerfMonitorGroupStringAMD", "glGetPerfMonitorGroupsAMD",
+        "glGetPixelTexGenParameterfvSGIS", "glGetPixelTexGenParameterivSGIS",
+        "glGetPointerIndexedvEXT", "glGetPointerv", "glGetPointervEXT",
+        "glGetProgramBinary", "glGetProgramEnvParameterIivNV",
+        "glGetProgramEnvParameterIuivNV", "glGetProgramEnvParameterdvARB",
+        "glGetProgramEnvParameterfvARB", "glGetProgramInfoLog",
+        "glGetProgramInterfaceiv", "glGetProgramLocalParameterIivNV",
+        "glGetProgramLocalParameterIuivNV", "glGetProgramLocalParameterdvARB",
+        "glGetProgramLocalParameterfvARB", "glGetProgramNamedParameterdvNV",
+        "glGetProgramNamedParameterfvNV", "glGetProgramParameterdvNV",
+        "glGetProgramParameterfvNV", "glGetProgramPipelineInfoLog",
+        "glGetProgramPipelineiv", "glGetProgramResourceIndex",
+        "glGetProgramResourceLocation", "glGetProgramResourceLocationIndex",
+        "glGetProgramResourceName", "glGetProgramResourceiv",
+        "glGetProgramStageiv", "glGetProgramStringARB", "glGetProgramStringNV",
+        "glGetProgramSubroutineParameteruivNV", "glGetProgramiv",
+        "glGetProgramivARB", "glGetProgramivNV", "glGetQueryIndexediv",
+        "glGetQueryObjecti64v","glGetQueryObjecti64vEXT", "glGetQueryObjectiv",
+        "glGetQueryObjectivARB", "glGetQueryObjectui64v",
+        "glGetQueryObjectui64vEXT", "glGetQueryObjectuiv",
+        "glGetQueryObjectuivARB", "glGetQueryiv", "glGetQueryivARB",
+        "glGetRenderbufferParameteriv", "glGetRenderbufferParameterivEXT",
+        "glGetSamplerParameterIiv", "glGetSamplerParameterIuiv",
+        "glGetSamplerParameterfv", "glGetSamplerParameteriv",
+        "glGetSeparableFilterEXT", "glGetShaderInfoLog",
+        "glGetShaderPrecisionFormat", "glGetShaderSource",
+        "glGetShaderSourceARB", "glGetShaderiv", "glGetSharpenTexFuncSGIS",
+        "glGetString", "glGetStringi", "glGetSynciv",
+        "glGetTexBumpParameterfvATI", "glGetTexBumpParameterivATI",
+        "glGetTexEnvfv", "glGetTexEnviv", "glGetTexFilterFuncSGIS",
+        "glGetTexGendv", "glGetTexGenfv", "glGetTexGeniv",
+        "glGetTexLevelParameterfv", "glGetTexLevelParameteriv",
+        "glGetTexParameterIiv", "glGetTexParameterIivEXT",
+        "glGetTexParameterIuiv", "glGetTexParameterIuivEXT",
+        "glGetTexParameterPointervAPPLE", "glGetTexParameterfv",
+        "glGetTexParameteriv", "glGetTextureLevelParameterfvEXT",
+        "glGetTextureLevelParameterivEXT", "glGetTextureParameterIivEXT",
+        "glGetTextureParameterIuivEXT", "glGetTextureParameterfvEXT",
+        "glGetTextureParameterivEXT", "glGetTrackMatrixivNV",
+        "glGetTransformFeedbackVarying", "glGetTransformFeedbackVaryingEXT",
+        "glGetTransformFeedbackVaryingNV", "glGetUniformIndices",
+        "glGetUniformSubroutineuiv", "glGetUniformdv", "glGetUniformfv",
+        "glGetUniformfvARB", "glGetUniformi64vNV", "glGetUniformiv",
+        "glGetUniformivARB", "glGetUniformui64vNV", "glGetUniformuiv",
+        "glGetUniformuivEXT", "glGetVariantArrayObjectfvATI",
+        "glGetVariantArrayObjectivATI", "glGetVariantBooleanvEXT",
+        "glGetVariantFloatvEXT", "glGetVariantIntegervEXT",
+        "glGetVariantPointervEXT", "glGetVertexArrayIntegeri_vEXT",
+        "glGetVertexArrayIntegervEXT", "glGetVertexArrayPointeri_vEXT",
+        "glGetVertexArrayPointervEXT", "glGetVertexAttribArrayObjectfvATI",
+        "glGetVertexAttribArrayObjectivATI", "glGetVertexAttribIiv",
+        "glGetVertexAttribIivEXT", "glGetVertexAttribIuiv",
+        "glGetVertexAttribIuivEXT", "glGetVertexAttribLdv",
+        "glGetVertexAttribLdvEXT", "glGetVertexAttribLi64vNV",
+        "glGetVertexAttribLui64vNV", "glGetVertexAttribPointerv",
+        "glGetVertexAttribPointervARB", "glGetVertexAttribPointervNV",
+        "glGetVertexAttribdv", "glGetVertexAttribdvARB",
+        "glGetVertexAttribdvNV", "glGetVertexAttribfv",
+        "glGetVertexAttribfvARB", "glGetVertexAttribfvNV",
+        "glGetVertexAttribiv", "glGetVertexAttribivARB",
+        "glGetVertexAttribivNV", "glGetVideoCaptureStreamdvNV",
+        "glGetVideoCaptureStreamfvNV", "glGetVideoCaptureStreamivNV",
+        "glGetVideoCaptureivNV", "glGetVideoi64vNV", "glGetVideoivNV",
+        "glGetVideoui64vNV", "glGetVideouivNV", "glGetnMapdvARB",
+        "glGetnMapfvARB", "glGetnMapivARB", "glGetnUniformdvARB",
+        "glGetnUniformfvARB", "glGetnUniformivARB", "glGetnUniformuivARB",
+        "glInsertEventMarkerEXT", "glIsAsyncMarkerSGIX", "glIsBuffer",
+        "glIsBufferARB", "glIsBufferResidentNV", "glIsEnabled",
+        "glIsEnabledIndexedEXT", "glIsEnabledi", "glIsFenceAPPLE",
+        "glIsFenceNV", "glIsFramebuffer", "glIsFramebufferEXT", "glIsList",
+        "glIsNameAMD", "glIsNamedBufferResidentNV", "glIsNamedStringARB",
+        "glIsObjectBufferATI", "glIsOcclusionQueryNV", "glIsProgram",
+        "glIsProgramARB", "glIsProgramNV", "glIsProgramPipeline", "glIsQuery",
+        "glIsQueryARB", "glIsRenderbuffer", "glIsRenderbufferEXT",
+        "glIsSampler", "glIsShader", "glIsSync", "glIsTexture",
+        "glIsTextureEXT", "glIsTransformFeedback", "glIsTransformFeedbackNV",
+        "glIsVariantEnabledEXT", "glIsVertexArray", "glIsVertexArrayAPPLE",
+        "glIsVertexAttribEnabledAPPLE", "glObjectLabel", "glObjectLabelKHR",
+        "glObjectPtrLabel", "glObjectPtrLabelKHR", "glPopDebugGroup",
+        "glPopDebugGroupKHR", "glPopGroupMarkerEXT", "glPushDebugGroup",
+        "glPushDebugGroupKHR", "glPushGroupMarkerEXT", "glStringMarkerGREMEDY",
+        "glXGetClientString", "glXGetConfig", "glXGetCurrentContext",
+        "glXGetCurrentDisplay", "glXGetCurrentDisplayEXT",
+        "glXGetCurrentDrawable", "glXGetCurrentReadDrawable",
+        "glXGetCurrentReadDrawableSGI", "glXGetProcAddress",
+        "glXGetProcAddressARB", "glXIsDirect", "glXQueryExtension",
+        "glXQueryExtensionsString", "glXQueryVersion","wglDescribePixelFormat",
+        "wglGetCurrentContext", "wglGetCurrentDC", "wglGetDefaultProcAddress",
+        "wglGetExtensionsStringARB", "wglGetExtensionsStringEXT",
+        "wglGetPixelFormat","wglGetProcAddress"]
+
+        # see trace_model.hpp
+        self.CALL_FLAG_FAKE = False
+        self.CALL_FLAG_NON_REPRODUCIBLE = False
+
+        if self.name in noEffect:
+            self.CALL_FLAG_NO_SIDE_EFFECTS = True
+        else:
+            self.CALL_FLAG_NO_SIDE_EFFECTS = False
+
+        self.CALL_FLAG_RENDER = False
+        self.CALL_FLAG_SWAP_RENDERTARGET = False
+
+        if self.name in endOfFrame and \
+            (self.traceFile.fullFilePosition \
+            -self.traceFile.lastFrameBreakPos)*1000/ \
+            os.path.getsize(self.traceFile.fileName) > 5:
+
+            self.CALL_FLAG_END_FRAME = True
+            self.traceFile.lastFrameBreakPos = self.traceFile.fullFilePosition
+        else:
+            self.CALL_FLAG_END_FRAME = False
+
+        self.CALL_FLAG_INCOMPLETE = False
+        self.CALL_FLAG_VERBOSE = False
+
+        self.CALL_FLAG_MARKER = False
+        self.CALL_FLAG_MARKER_PUSH = False
+        self.CALL_FLAG_MARKER_POP = False
+
+"""
 ##
 # startup
 def main():
@@ -390,6 +614,11 @@ def main():
         try:
             call = cTraceCall(currentTrace)
             returnedcall = call.parseCall()
+        except:
+            print "last given frame",  currentTrace.nextCallNumber
+            break
+
+        if returnedcall.CALL_FLAG_NO_SIDE_EFFECTS == False:
             paramlist = "("
             for i in range(0,  returnedcall.paramAmount):
                 if len(returnedcall.paramValues) >= i:
@@ -400,16 +629,16 @@ def main():
                     if i < returnedcall.paramAmount-1:
                         paramlist += ", "
             paramlist += ")"
-            print "@" + str(returnedcall.threadID) + " " + str(returnedcall.callNumber) + " " + returnedcall.name + paramlist
+            print "@" + str(returnedcall.threadID) + " " \
+                + str(returnedcall.callNumber) + " " \
+                + returnedcall.name + paramlist
+
             if returnedcall.returnValue != None:
                 print "----> ",  returnedcall.returnValue
-        except:
-            print currentTrace.nextCallNumber,  " --",  returnedcall.name
-            break
 
         returnedcall = None
 
 if __name__ == "__main__":
     main()
 
-
+"""
