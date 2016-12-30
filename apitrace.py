@@ -144,7 +144,7 @@ class cTraceFile:
         arraylenght = self.intReader()
         array = []
         for i in range(0,  arraylenght):
-            array += self.parseValue()
+            array.append(self.parseValue())
         return array
 
     def queryLista(self,  sigs,  id):
@@ -221,7 +221,7 @@ class cTraceFile:
 
         rval = []
         for i in lista:
-                rval.append((self.parseValue(), i))
+            rval.append((self.parseValue(), i))
 
         return rval
 
@@ -274,7 +274,8 @@ class cTraceFile:
 
         self.mem = self.traceFile.read(2)
         self.filePointer += 2
-        if self.mem != 'at':
+
+        if str(self.mem).startswith('at') != True:
             raise Exception("not snappy file!")
 
         length = int(struct.unpack('I', self.traceFile.read(4))[0])
