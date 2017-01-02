@@ -1,11 +1,39 @@
+#!/usr/bin/env python
+# -*- coding: iso-8859-1 -*-
+
+"""*************************************************************************
+ * Copyright (C) 2016 Intel Corporation.   All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ * IN THE SOFTWARE.
+ ***************************************************************************/
+"""
+
+
 import sys
 import hashlib
 from apitrace import cTraceFile,  cTraceCall
-
 IncludeFilePointer = None
 DataFilePointer = None
 currentlyWritingFile = None
 currentFrame = 0
+from cwriterglx import glxSpecial
 
 arraycounter = 0
 
@@ -21,7 +49,7 @@ def newFile():
     currentlyWritingFile.truncate()
 
     currentlyWritingFile.write(str("#include \"includes.h\"\n"))
-    currentlyWritingFile.write(str("void frame_"+str(currentFrame)+"() {\n"))
+    currentlyWritingFile.write(str("void frame_"+str(currentFrame)+"(int thisthread) {\n"))
     return True
 
 def closeFile():
@@ -52,6 +80,13 @@ def writeoutBlob(blobName,  blobi):
 def writeoutMemoryMacro():
     global IncludeFilePointer, DataFilePointer
 
+    for i in range(0, currentFrame):
+        IncludeFilePointer.write("void frame_" + str(i) +"(int);\n")
+
+    IncludeFilePointer.write("\n\n#define call_all_frames\\\n")
+    for i in range(0, currentFrame):
+        IncludeFilePointer.write("\tframe_" + str(i) +"(this_thread); \\\n")
+
     for i in writtenBlobs:
         if "blob" in i:
             DataFilePointer.write(str("unsigned char *" + i + " = NULL;\n"))
@@ -61,12 +96,12 @@ def writeoutMemoryMacro():
     for i in writtenBlobs:
         if "blob" in i:
             IncludeFilePointer.write(str("    " + i + " = (unsigned char*)LOADER(\"" + i + "\"); \\\n"))
-            
+
         if "string" in i or "varyings" in i:
             strnum = int(i[i.rfind("_")+1:])
             strname = i[:i.rfind("_")]
             IncludeFilePointer.write(str("    " + strname + "_p[" + str(strnum) + "] = LOADER(\"" + i + "\");\\\n"))
-            
+
         if "dest" in i:
             DataFilePointer.write(str("void* " + i + " = NULL;\n"))
             IncludeFilePointer.write(str("extern void* " + i + ";\n"))
@@ -80,249 +115,83 @@ def writeoutMemoryMacro():
 
     IncludeFilePointer.write(str("\n\n"))
 
-def handleArray(itemi):
+def handleArray_String(callName,  paramName, Value):
+    global IncludeFilePointer, DataFilePointer, arraycounter
+    strname = "_string_"+ str(arraycounter)
+    arraycounter = arraycounter+1
+    writeoutBlob(strname,  Value)
+    return strname
+
+def handleArray_Struct(Value):
+    global IncludeFilePointer, DataFilePointer, arraycounter
+    strname = "_struct_"+ str(arraycounter) + "_p"
+    arraycounter = arraycounter+1
+
+    structtext = "{"
+    structbreaker = ""
+    for i in range(0, len(Value)):
+        structtext += structbreaker
+        rval = str(format(Value[i][0][0], '08x'))
+        structtext += str("0x" + rval )
+        structbreaker = ", "
+
+    structtext += "};"
+    print structtext
+    IncludeFilePointer.write("extern GLuint " + strname + "[];\n")
+    DataFilePointer.write("GLuint " + strname + "[] = " + structtext+ "\n")
+    return strname
+
+
+def handleArray(call,  index):
+    switches = {
+        "TYPE_NULL": "NULL",
+        "TYPE_FALSE": "False",
+        "TYPE_TRUE": "True",
+        "TYPE_SINT": lambda call,  paramname,  paramvalue : paramvalue,
+        "TYPE_UINT": lambda call,  paramname,  paramvalue : paramvalue,
+        "TYPE_FLOAT": lambda call,  paramname,  paramvalue : paramvalue,
+        "TYPE_DOUBLE": lambda call,  paramname,  paramvalue : paramvalue,
+        "TYPE_STRING": lambda call,  paramname,  paramvalue : handleArray_String(call,  paramname,  paramvalue),
+#        "TYPE_BLOB": lambda : (self.stringReader(), "TYPE_BLOB"),
+        "TYPE_ENUM": lambda call,  paramname,  paramvalue : paramvalue, 
+        "TYPE_BITMASK": lambda call,  paramname,  paramvalue : paramvalue,
+#        "TYPE_ARRAY": lambda : (self.arrayReader(), "TYPE_ARRAY"),
+        "TYPE_STRUCT": lambda call,  paramname,  paramvalue : handleArray_Struct(paramvalue),
+        "TYPE_OPAQUE": lambda call,  paramname,  paramvalue : paramvalue,
+#        "TYPE_REPR": lambda : (self.readRepr(), "TYPE_REPR"),
+#        "TYPE_WSTRING": lambda : (self.readWString(), "TYPE_WSTRING")
+    }
+
     global IncludeFilePointer, DataFilePointer,  arraycounter
     returnnimi = "FAILED AT handleArray !!!"
-    if itemi[0][1] is "TYPE_STRING":
-        IncludeFilePointer.write("extern char* _string_" + str(arraycounter) + "_p["+ str(len(itemi)-1)+"];\n")
-        DataFilePointer.write("char* _string_" + str(arraycounter) + "_p["+ str(len(itemi)-1)+"];\n")
-        
-        for i in range(0, len(itemi)-1):
-            strname = "_string_"+ str(arraycounter) +"_"+str(i)
-            writeoutBlob(strname,  itemi[i][0])
-        
-        returnnimi = str("_string_" + str(arraycounter) + "_p")
 
-    if itemi[0][1] is "TYPE_FLOAT":
-        IncludeFilePointer.write("extern GLfloat _float_" + str(arraycounter) + "_p[];\n")
-        DataFilePointer.write("GLfloat _float_" + str(arraycounter) + "_p[] = {")#["+ str(len(itemi)-1)+"];\n")
-        breakitem = ""
-        for i in range(0, len(itemi)-1):
-            DataFilePointer.write(breakitem + str(itemi[i][0])+"f")
-            breakitem = ", "
-            
-        DataFilePointer.write( "};\n")
-        returnnimi = str("_float_" + str(arraycounter) + "_p")
+    if len(call.paramValues[index][0]) == 0:
+        return "NULL"
 
+    writeouttype = "GLuint"
+    arraytext = "{"
+    arraybreaker = ""
+    for item in call.paramValues[index][0]:
+        rVal = ""
+        arraytext += arraybreaker
+        try:
+            rVal = switches[item[1]](call.name, call.paramNames[index],  item[0])
+            if item[1] == "TYPE_STRING":
+                writeouttype = "char*"
+            if item[1] == "TYPE_FLOAT":
+                writeouttype = "float"
+        except:
+            rVal = "\"" + item[1] + " not implemented yet" + "\""
+
+        arraytext += str(rVal)
+        arraybreaker = ", "
+    arraytext += "};"
+
+    returnnimi = "_array_" + str(arraycounter) + "_p"
+    IncludeFilePointer.write("extern " + writeouttype + " " + returnnimi + "[];\n")
+    DataFilePointer.write(writeouttype + " " + returnnimi + "[] = " + arraytext+ "\n")
     arraycounter = arraycounter+1
     return returnnimi
-
-class glxSpecial:
-    stubSource = """#include <stdio.h>
-#include <stdlib.h>
-#include "includes.h"
-
-Display   *display;
-GLXContext context;
-Window     xWin;
-
-#ifdef use_glXCreateContextAttribsARB
-typedef GLXContext (*GLXCREATECONTEXTATTRIBSARBPROC)(Display*, GLXFBConfig, GLXContext, Bool, const int*);
-#endif
-
-static void run_trace()
-{
-	call_all_frames
-	return;
-}
-
-static Bool WaitForNotify( Display *dpy, XEvent *event, XPointer arg ) {
-	return (event->type == MapNotify) && (event->xmap.window == (Window) arg);
-	(void)dpy;
-}
-
-static int xerrorhandler(Display *dpy, XErrorEvent *error)
-{
-	char retError[256];
-	XGetErrorText(dpy, error->error_code, retError, sizeof(retError));
-	fprintf(stderr, "Fatal error from X: %s\\n", (char*)&retError);
-	exit( EXIT_FAILURE);
-}
-
-int main(int argc, char *argv[])
-{
-	XEvent                event;
-	XVisualInfo          *vInfo;
-	XSetWindowAttributes  swa;
-	int                   swaMask;
-#ifdef use_glXChooseFBConfig
-	int                   fbc_amount, c, chosen_fbc = -1, best_samples = -1, samp_buf, samples;
-	GLXFBConfig          *fbc;
-#endif
-#ifdef use_glXCreateContextAttribsARB
-	GLXCREATECONTEXTATTRIBSARBPROC glXCreateContextAttribsARB;
-#endif
-
-	load_all_blobs;
-
-	display = XOpenDisplay(NULL);
-	if (display == NULL) {
-		printf( "Unable to open a connection to the X server\\n" );
-		exit( EXIT_FAILURE );
-	}
-
-	XSetErrorHandler(xerrorhandler);
-
-#ifdef use_glXChooseFBConfig
-	fbc = glXChooseFBConfig(display, DefaultScreen(display),
-							glx_visual_params0, &fbc_amount);
-
-	if (fbc == 0) {
-		printf( "Not able to find matching framebuffer\\n" );
-		exit( EXIT_FAILURE );
-	}
-	for (c = 0; c < fbc_amount; c++) {
-		vInfo = glXGetVisualFromFBConfig(display, fbc[c]);
-		if (vInfo) {
-			glXGetFBConfigAttrib(display, fbc[c], GLX_SAMPLE_BUFFERS, &samp_buf);
-			glXGetFBConfigAttrib(display, fbc[c], GLX_SAMPLES, &samples);
-
-#ifdef DEBUG
-			printf("GLXFBConfig %d, id 0x%2x sample buffers %d, samples = %d\\n", c, (unsigned int)vInfo->visualid, samp_buf, samples );
-#endif
-
-		if (chosen_fbc < 0 || (samp_buf && samples > best_samples))
-			chosen_fbc = c, best_samples = samples;
-		}
-		XFree(vInfo);
-	}
-	vInfo = glXGetVisualFromFBConfig(display, fbc[chosen_fbc]);
-#ifdef DEBUG
-	printf("chosen visual = 0x%x\\n", (unsigned int)vInfo->visualid);
-#endif
-#else
-	vInfo = glXChooseVisual(display, 0, glx_visual_params0);
-#endif
-
-	swa.colormap = XCreateColormap( display, RootWindow(display, vInfo->screen),
-							vInfo->visual, AllocNone );
-	swa.event_mask = StructureNotifyMask;
-	swaMask = CWColormap | CWEventMask;
-
-	xWin = XCreateWindow(display, RootWindow(display, vInfo->screen), 0, 0, screensize0[0], screensize0[1],
-		0, vInfo->depth, InputOutput, vInfo->visual,
-		swaMask, &swa);
-
-#ifdef use_glXCreateContextAttribsARB
-	glXCreateContextAttribsARB = (GLXCREATECONTEXTATTRIBSARBPROC) 
-		glXGetProcAddress((const GLubyte*)"glXCreateContextAttribsARB");
-
-	context = glXCreateContextAttribsARB(display, fbc[chosen_fbc], NULL, True,
-			ContextAttribsARB0);
-#else
-	context = glXCreateContext( display, vInfo, NULL, True );
-#endif
-#ifdef use_glXChooseFBConfig
-	XFree(fbc);
-#endif
-
-	XMapWindow(display, xWin);
-	XIfEvent(display, &event, WaitForNotify, (XPointer) xWin);
-
-	glXMakeCurrent(display, xWin, context);
-
-	/*
-	* Setup done. Now go to the trace.
-	*/
-	run_trace();
-
-	glXMakeContextCurrent(display, 0, 0, 0);
-	glXDestroyContext(display, context);
-	XDestroyWindow(display, xWin);
-	XFree(vInfo);
-	XCloseDisplay(display);
-
-	free_all_blobs;
-
-	exit( EXIT_SUCCESS );
-
-	(void)argc;
-	(void)argv;
-}
-"""
-    MakefileString="""CC = gcc
-
-CFLAGS=$(shell pkg-config --cflags gl x11 glu) -Wall -ansi -O0 --std=c99
-LIBS=$(shell pkg-config --libs gl x11 glu)
-
-SRCS=$(wildcard *.c)
-OBJS=$(SRCS:.c=.o)
-
-%.o : %.c
-\t$(CC) -c $(CFLAGS) $< -o $@
-
-glxtest: $(OBJS)
-\t$(CC) -o $@ $^ $(LIBS)
-
-clean:
-\t@echo Cleaning up...
-\t@rm glxtest
-\t@rm *.o
-\t@echo Done.
-"""
-
-    IncludeFile = """#define GL_GLEXT_PROTOTYPES 1
-#define GL3_PROTOTYPES 1
-
-
-
-
-#include <stdio.h>
-#include <string.h>
-#include <math.h>
-#include <GL/gl.h>
-#include <GL/glx.h>
-#include <GL/glu.h>
-#include <GL/glext.h>
-
-
-extern Display *display;
-extern GLXContext context;
-extern Window xWin;
-
-
-extern GLuint _programs_0;
-void frame_0();
-
-
-#define LOADER(x) \\
-({ \\
-    FILE *fp = fopen( x, \"rb\" ); \\
-    fseek(fp, 0, SEEK_END); \\
-    int size = ftell(fp); \\
-    fseek(fp, 0, SEEK_SET); \\
-    char* result = calloc(size+1, 1); \\
-    fread((void*)result, size, 1, fp); \\
-    fclose(fp); \\
-    result; \\
-})
-
-
-"""
-         
-    def SetupWriteout(self):
-        global IncludeFilePointer, DataFilePointer
-
-        MkFilePointer = open( "Makefile" , "w" )
-        MkFilePointer.truncate()
-        MkFilePointer.write(self.MakefileString)
-        MkFilePointer.close()
-        MkFilePointer = None
-
-        IncludeFilePointer = open( "includes.h" , "w" )
-        IncludeFilePointer.truncate()
-        IncludeFilePointer.write(self.IncludeFile)
-
-        DataFilePointer = open("data.c", "w")
-        DataFilePointer.truncate()
-        DataFilePointer.write("#include \"includes.h\"\n")
-        DataFilePointer.write("\nGLuint programs_0 = 0;\n")
-
-        StubFilePointer = open( "main.c" , "w" )
-        StubFilePointer.truncate()
-        StubFilePointer.write(self.stubSource)
-        StubFilePointer.close()
-        StubFilePointer = None
 
 def handleResources(call):
     retval = "\t"
@@ -352,6 +221,7 @@ def main():
     global IncludeFilePointer, DataFilePointer
     currentlyWritingFile = None
     lastThread = -1
+    maxThread = 0
     try:
         currentTrace = cTraceFile(sys.argv[1])
     except IOError:
@@ -372,15 +242,21 @@ def main():
             call = cTraceCall(currentTrace)
             wasFirstCall = newFile()
             returnedcall = call.parseCall()
+
+            if "glGenBuffer" in returnedcall.name:
+                print "hello\n"
+
             if setupwriter is None:
                 if currentTrace.api == "API_GL":
                     setupwriter = glxSpecial()
-                    setupwriter.SetupWriteout()
- 
+                    IncludeFilePointer,  DataFilePointer = setupwriter.SetupWriteout()
+
         except:
             closeFile()
             print ("last given call",  currentTrace.nextCallNumber)
- 
+
+            IncludeFilePointer.write("#define max_thread " + str(maxThread+1) + "\n\n")
+
             writeoutMemoryMacro()
             IncludeFilePointer.close()
             IncludeFilePointer = None
@@ -389,7 +265,11 @@ def main():
             break
 
         if lastThread != returnedcall.threadID:
+            if maxThread < returnedcall.threadID:
+                maxThread = returnedcall.threadID
+
             if wasFirstCall == False:
+                currentlyWritingFile.write("\t\tsem_post(&lock["+ str(returnedcall.threadID) +"]);\n\n")
                 currentlyWritingFile.write("\t}\n\n")
 
             currentlyWritingFile.write("\tif(thisthread == " + str(returnedcall.threadID) + ") {\n")
@@ -405,16 +285,15 @@ def main():
                         returnedcall.paramValues[i]  = ("context",  0)
                     if returnedcall.paramNames[i] == "drawable":
                         returnedcall.paramValues[i] = ("xWin",  0)
-                    
+
                     if returnedcall.paramValues[i][1] == "TYPE_BLOB":
                         bname = printBlobName(returnedcall.paramValues[i][0])
                         if bname not in writtenBlobs:
                             writeoutBlob(bname,  returnedcall.paramValues[i][0])
-#                        print (str(bname))
                         paramlist += str(bname)
                     else:
                         if returnedcall.paramValues[i][1] == "TYPE_ARRAY":
-                            paramlist += handleArray(returnedcall.paramValues[i])
+                            paramlist += handleArray(returnedcall,  i)
                         else:
                             paramlist += str(returnedcall.paramValues[i][0])
                     if i < returnedcall.paramAmount-1:
@@ -424,6 +303,7 @@ def main():
             currentlyWritingFile.write("\t")
             currentlyWritingFile.write(handleResources(returnedcall))
             currentlyWritingFile.write(str(returnedcall.name + paramlist+";\n"))
+            currentlyWritingFile.flush()
 
             if returnedcall.returnValue != None:
                 print ("----> ",  returnedcall.returnValue)
