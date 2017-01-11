@@ -25,7 +25,6 @@
  ***************************************************************************/
 """
 
-#import sys
 import os
 import copy
 try:
@@ -84,9 +83,6 @@ enteredCallStack = [] # things with enter but no leave yet
 
 class cTraceFile:
     def getByte(self):
-        rval= ord(self.mem[self.containerPointer])
-        self.containerPointer += 1
-        self.fullFilePosition += 1
         if self.containerPointer == len(self.mem):
             length = int(struct.unpack('I', self.traceFile.read(4))[0])
             self.filePointer += 4
@@ -95,6 +91,9 @@ class cTraceFile:
             self.container += 1
             self.mem = snappy.uncompress(compressedMem)
             self.containerPointer = 0
+        rval= ord(self.mem[self.containerPointer])
+        self.containerPointer += 1
+        self.fullFilePosition += 1
         return rval
 
     def debug10next(self):
@@ -264,6 +263,7 @@ class cTraceFile:
         self.api = "API_UNKNOWN"
         self.traceFile = open(self.fileName, 'rb+')
         self.filePointer = 0
+        self.fileSize = os.path.getsize(self.fileName)
         self.nextCallNumber = 0
         self.lastFrameBreakPos = 0
 
@@ -342,12 +342,10 @@ class cTraceCall:
                 print ("CALL_BACKTRACE")
 
     def parseCall(self):
-        self.paramValues = []
-        self.callReturnValue = None
-
         while True:
             event = self.traceFile.getByte()
             if event == EVENT_ENTER:
+                self.paramValues = []
                 self.callNumber = self.traceFile.nextCallNumber
                 self.traceFile.nextCallNumber = self.traceFile.nextCallNumber+1
                 if self.traceFile.version >= 4:
@@ -598,48 +596,3 @@ class cTraceCall:
         self.CALL_FLAG_MARKER = False
         self.CALL_FLAG_MARKER_PUSH = False
         self.CALL_FLAG_MARKER_POP = False
-
-"""
-##
-# startup
-def main():
-    try:
-        currentTrace = cTraceFile(sys.argv[1])
-    except IOError:
-            print "problem with file ",  sys.argv[1]
-            sys.exit(1)
-
-    print "trace file version ", currentTrace.version
-
-    while True:
-        try:
-            call = cTraceCall(currentTrace)
-            returnedcall = call.parseCall()
-        except:
-            print "last given frame",  currentTrace.nextCallNumber
-            break
-
-        if returnedcall.CALL_FLAG_NO_SIDE_EFFECTS == False:
-            paramlist = "("
-            for i in range(0,  returnedcall.paramAmount):
-                if len(returnedcall.paramValues) >= i:
-                    if returnedcall.paramValues[i][1] == "TYPE_BLOB":
-                        paramlist += "blob"
-                    else:
-                        paramlist += str(returnedcall.paramValues[i][0])
-                    if i < returnedcall.paramAmount-1:
-                        paramlist += ", "
-            paramlist += ")"
-            print "@" + str(returnedcall.threadID) + " " \
-                + str(returnedcall.callNumber) + " " \
-                + returnedcall.name + paramlist
-
-            if returnedcall.returnValue != None:
-                print "----> ",  returnedcall.returnValue
-
-        returnedcall = None
-
-if __name__ == "__main__":
-    main()
-
-"""

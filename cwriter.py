@@ -38,6 +38,7 @@ from cwriterglx import glxSpecial
 arraycounter = 0
 
 writtenBlobs = []
+screensizes = []
 
 def newFile():
     global currentlyWritingFile, currentFrame 
@@ -86,11 +87,16 @@ def writeoutMemoryMacro():
     IncludeFilePointer.write("\n\n#define call_all_frames\\\n")
     for i in range(0, currentFrame):
         IncludeFilePointer.write("\tframe_" + str(i) +"(this_thread); \\\n")
+    IncludeFilePointer.write("\n\n")
 
     for i in writtenBlobs:
         if "blob" in i:
             DataFilePointer.write(str("unsigned char *" + i + " = NULL;\n"))
             IncludeFilePointer.write(str("extern unsigned char *" + i + ";\n"))
+
+        if "dest" in i:
+            DataFilePointer.write(str("void* " + i + " = NULL;\n"))
+            IncludeFilePointer.write(str("extern void* " + i + ";\n"))
 
     IncludeFilePointer.write("\n\n#define load_all_blobs\\\n")
     for i in writtenBlobs:
@@ -100,11 +106,7 @@ def writeoutMemoryMacro():
         if "string" in i or "varyings" in i:
             strnum = int(i[i.rfind("_")+1:])
             strname = i[:i.rfind("_")]
-            IncludeFilePointer.write(str("    " + strname + "_p[" + str(strnum) + "] = LOADER(\"" + i + "\");\\\n"))
-
-        if "dest" in i:
-            DataFilePointer.write(str("void* " + i + " = NULL;\n"))
-            IncludeFilePointer.write(str("extern void* " + i + ";\n"))
+            IncludeFilePointer.write(str("    " + strname + "_" + str(strnum) + " = LOADER(\"" + i + "\");\\\n"))
 
     IncludeFilePointer.write(str("\n\n"))
 
@@ -119,7 +121,11 @@ def handleArray_String(callName,  paramName, Value):
     global IncludeFilePointer, DataFilePointer, arraycounter
     strname = "_string_"+ str(arraycounter)
     arraycounter = arraycounter+1
-    writeoutBlob(strname,  Value)
+
+    if strname not in writtenBlobs and strname!= "":
+        IncludeFilePointer.write("extern char* " + strname+ ";\n")
+        DataFilePointer.write("char* " + strname + ";\n")
+        writeoutBlob(strname,  Value)
     return strname
 
 def handleArray_Struct(Value):
@@ -194,26 +200,65 @@ def handleArray(call,  index):
     return returnnimi
 
 def handleResources(call):
-    retval = "\t"
     nimi = ""
 
     listOfHandlets = [ ("glCreateProgram",  "programs_", "GLuint "), 
                                ("glCreateShader", "shader_", "GLuint "), 
-                               ("glMapBuffer", "dest_", "void* "), 
                                ("glFenceSync", "sync_", "GLsync ")]
 
-    if call.returnValue != None:
+    if call.returnValue != None and call.returnValue[1] == "TYPE_OPAQUE":
+        p = call.returnValue[0]
+        if "NULL" not in str(p) and str(p).isdigit() == True:
+            nimi = str("dest_" + format(p, '08x'))
+            call.returnValue = (nimi, "TYPE_OPAQUE")
+            if nimi not in writtenBlobs and nimi != "":
+                writtenBlobs.append(nimi)
+
+    if call.returnValue != None and call.returnValue[1] == "TYPE_INT":
         for item in listOfHandlets:
-            if item[0]  in call.name:
+            if item[0] in call.name:
                 nimi = item[1] +str(call.returnValue[0])
-                retval = "\t" + nimi+" = "
+                call.returnValue = nimi
+                if nimi not in writtenBlobs and nimi != "":
+                    writtenBlobs.append(nimi)
 
-    if nimi not in writtenBlobs:
-        writtenBlobs.append(nimi)
-    return retval
+    for i in range(0,  call.paramAmount):
+        if len(call.paramValues) >= i:
+            if call.paramNames[i] == "dest":
+                p = (str("dest_" + format(call.paramValues[i][0], '08x')),  "TYPE_OPAQUE")
+                call.paramValues[i] = p
 
+    return
 
+def specialCalls(call):
+    if "glViewport" in call.name:
+        th = call.threadID
 
+        a = [item for item in screensizes if item[0] == th]
+        if len(a) == 0:
+            a = (th, (0, 0))
+            screensizes.append(a)
+        else:
+            a = a[0]
+        
+        if a[1][0] <= call.paramValues[2][0]:
+            a = (th, (call.paramValues[2][0], call.paramValues[3][0]))
+
+            for i in range(0,  len(screensizes)):
+                if screensizes[i][0] is th:
+                    screensizes[i] = a
+            
+
+def outputSpecialParams():
+    for i in range(0,  len(screensizes)):
+        IncludeFilePointer.write("#define wwidth_" + str(screensizes[i][0]) + " "  + str(screensizes[i][1][0]) + "\n")
+        IncludeFilePointer.write("#define wheight_" + str(screensizes[i][0]) + " "  + str(screensizes[i][1][1]) + "\n")
+
+def ignoreCall(call):
+    listOfCallsToIgnore = ["glXGetSwapIntervalMESA"]
+    if call.name in listOfCallsToIgnore:
+        return True
+    return False
 ##
 # startup
 def main():
@@ -240,22 +285,27 @@ def main():
     while True:
         try:
             call = cTraceCall(currentTrace)
-            wasFirstCall = newFile()
             returnedcall = call.parseCall()
-
-            if "glGenBuffer" in returnedcall.name:
-                print "hello\n"
+            
+            wasFirstCall = newFile()
+            specialCalls(returnedcall)
 
             if setupwriter is None:
                 if currentTrace.api == "API_GL":
                     setupwriter = glxSpecial()
-                    IncludeFilePointer,  DataFilePointer = setupwriter.SetupWriteout()
+                    IncludeFilePointer, DataFilePointer = setupwriter.SetupWriteout()
+                    setupwriter.HandleSpecialCalls(returnedcall, IncludeFilePointer, DataFilePointer,  arraycounter)
+            else:
+                setupwriter.HandleSpecialCalls(returnedcall, IncludeFilePointer, DataFilePointer,  arraycounter)
 
         except:
+            ###
+            # exit from parsing the file
             closeFile()
             print ("last given call",  currentTrace.nextCallNumber)
 
             IncludeFilePointer.write("#define max_thread " + str(maxThread+1) + "\n\n")
+            outputSpecialParams()
 
             writeoutMemoryMacro()
             IncludeFilePointer.close()
@@ -269,20 +319,22 @@ def main():
                 maxThread = returnedcall.threadID
 
             if wasFirstCall == False:
-                currentlyWritingFile.write("\t\tsem_post(&lock["+ str(returnedcall.threadID) +"]);\n\n")
+                currentlyWritingFile.write("\t\tsem_post(&lock["+ str(returnedcall.threadID) +"]);\n\t\tsem_wait(&lock["+ str(lastThread) +"]);\n")
                 currentlyWritingFile.write("\t}\n\n")
 
             currentlyWritingFile.write("\tif(thisthread == " + str(returnedcall.threadID) + ") {\n")
             lastThread = returnedcall.threadID
 
         if returnedcall.CALL_FLAG_NO_SIDE_EFFECTS == False:
+            handleResources(returnedcall)
             paramlist = "("
             for i in range(0,  returnedcall.paramAmount):
                 if len(returnedcall.paramValues) >= i:
                     if returnedcall.paramNames[i] == "dpy":
                         returnedcall.paramValues[i] = ("display",  0)
-                    if returnedcall.paramNames[i] == "ctx":
-                        returnedcall.paramValues[i]  = ("context",  0)
+                    if returnedcall.paramNames[i] == "ctx" and returnedcall.paramValues[i][0] == "TYPE_OPAQUE":
+                        p = call.paramValues[i][0]
+                        call.paramValues[i] = (str("context_" + format(p, '08x')),  "TYPE_OPAQUE")
                     if returnedcall.paramNames[i] == "drawable":
                         returnedcall.paramValues[i] = ("xWin",  0)
 
@@ -294,19 +346,29 @@ def main():
                     else:
                         if returnedcall.paramValues[i][1] == "TYPE_ARRAY":
                             paramlist += handleArray(returnedcall,  i)
+                        elif returnedcall.paramValues[i][1] == "TYPE_STRING":
+                            paramlist += "\"" + str(returnedcall.paramValues[i][0]) + "\""
                         else:
                             paramlist += str(returnedcall.paramValues[i][0])
                     if i < returnedcall.paramAmount-1:
                         paramlist += ", "
             paramlist += ")"
 
-            currentlyWritingFile.write("\t")
-            currentlyWritingFile.write(handleResources(returnedcall))
-            currentlyWritingFile.write(str(returnedcall.name + paramlist+";\n"))
-            currentlyWritingFile.flush()
+            if ignoreCall(returnedcall) != True:
+                currentlyWritingFile.write("\t\t")
 
-            if returnedcall.returnValue != None:
-                print ("----> ",  returnedcall.returnValue)
+                i = currentTrace.filePointer*20/currentTrace.fileSize
+                sys.stdout.write('\r')
+                if returnedcall.callNumber % 40 == 0:
+                    sys.stdout.write("[%-20s] %d%% Current Frame: %d" % ('#'*i, 5*i,  currentFrame))
+                    sys.stdout.flush()
+
+                if returnedcall.returnValue != None and returnedcall.returnValue[1] == "TYPE_OPAQUE":
+                    currentlyWritingFile.write(str(returnedcall.returnValue[0]) + " = ")
+
+                currentlyWritingFile.write(str(returnedcall.name + paramlist+";\n"))
+                currentlyWritingFile.flush()
+
 
         if "SwapBuffers" in returnedcall.name:
             closeFile()
