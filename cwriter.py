@@ -104,9 +104,13 @@ def writeoutMemoryMacro():
             IncludeFilePointer.write(str("    " + i + " = (unsigned char*)LOADER(\"" + i + "\"); \\\n"))
 
         if "string" in i or "varyings" in i:
+            additionalString = ""
+            splitter =  i.split("_")
+            if splitter[1] == "string" and len(splitter) == 4:
+                additionalString = "_array_"+str(splitter[2])+"_p["+str(splitter[3])+"] = "
             strnum = int(i[i.rfind("_")+1:])
             strname = i[:i.rfind("_")]
-            IncludeFilePointer.write(str("    " + strname + "_" + str(strnum) + " = LOADER(\"" + i + "\");\\\n"))
+            IncludeFilePointer.write(str("    " + additionalString + strname + "_" + str(strnum) + " = LOADER(\"" + i + "\");\\\n"))
 
     IncludeFilePointer.write(str("\n\n"))
 
@@ -117,16 +121,22 @@ def writeoutMemoryMacro():
 
     IncludeFilePointer.write(str("\n\n"))
 
-def handleArray_String(callName,  paramName, Value):
+def handleArray_String(call,  index, Value):
     global IncludeFilePointer, DataFilePointer, arraycounter
-    strname = "_string_"+ str(arraycounter)
-    arraycounter = arraycounter+1
+
+    paramindex = 64738
+
+    for i in range(0, len(call.paramValues[index])):
+        if call.paramValues[index][i][0][0] == Value:
+            paramindex = i
+
+    strname = "_string_"+ str(arraycounter) + "_" + str(paramindex)
 
     if strname not in writtenBlobs and strname!= "":
         IncludeFilePointer.write("extern char* " + strname+ ";\n")
         DataFilePointer.write("char* " + strname + ";\n")
         writeoutBlob(strname,  Value)
-    return strname
+    return "NULL"
 
 def handleArray_Struct(Value):
     global IncludeFilePointer, DataFilePointer, arraycounter
@@ -153,17 +163,17 @@ def handleArray(call,  index):
         "TYPE_NULL": "NULL",
         "TYPE_FALSE": "False",
         "TYPE_TRUE": "True",
-        "TYPE_SINT": lambda call,  paramname,  paramvalue : paramvalue,
-        "TYPE_UINT": lambda call,  paramname,  paramvalue : paramvalue,
-        "TYPE_FLOAT": lambda call,  paramname,  paramvalue : paramvalue,
-        "TYPE_DOUBLE": lambda call,  paramname,  paramvalue : paramvalue,
-        "TYPE_STRING": lambda call,  paramname,  paramvalue : handleArray_String(call,  paramname,  paramvalue),
+        "TYPE_SINT": lambda call,  paramindex,  paramvalue : paramvalue,
+        "TYPE_UINT": lambda call,  paramindex,  paramvalue : paramvalue,
+        "TYPE_FLOAT": lambda call,  paramindex,  paramvalue : paramvalue,
+        "TYPE_DOUBLE": lambda call,  paramindex,  paramvalue : paramvalue,
+        "TYPE_STRING": lambda call,  paramindex,  paramvalue : handleArray_String(call,  paramindex,  paramvalue),
 #        "TYPE_BLOB": lambda : (self.stringReader(), "TYPE_BLOB"),
-        "TYPE_ENUM": lambda call,  paramname,  paramvalue : paramvalue, 
-        "TYPE_BITMASK": lambda call,  paramname,  paramvalue : paramvalue,
+        "TYPE_ENUM": lambda call,  paramindex,  paramvalue : paramvalue, 
+        "TYPE_BITMASK": lambda call,  paramindex,  paramvalue : paramvalue,
 #        "TYPE_ARRAY": lambda : (self.arrayReader(), "TYPE_ARRAY"),
-        "TYPE_STRUCT": lambda call,  paramname,  paramvalue : handleArray_Struct(paramvalue),
-        "TYPE_OPAQUE": lambda call,  paramname,  paramvalue : paramvalue,
+        "TYPE_STRUCT": lambda call,  paramindex,  paramvalue : handleArray_Struct(paramvalue),
+        "TYPE_OPAQUE": lambda call,  paramindex,  paramvalue : paramvalue,
 #        "TYPE_REPR": lambda : (self.readRepr(), "TYPE_REPR"),
 #        "TYPE_WSTRING": lambda : (self.readWString(), "TYPE_WSTRING")
     }
@@ -181,7 +191,7 @@ def handleArray(call,  index):
         rVal = ""
         arraytext += arraybreaker
         try:
-            rVal = switches[item[1]](call.name, call.paramNames[index],  item[0])
+            rVal = switches[item[1]](call, index,  item[0])
             if item[1] == "TYPE_STRING":
                 writeouttype = "char*"
             if item[1] == "TYPE_FLOAT":
@@ -264,6 +274,7 @@ def ignoreCall(call):
 def main():
     global currentlyWritingFile, currentFrame
     global IncludeFilePointer, DataFilePointer
+    global arraycounter
     currentlyWritingFile = None
     lastThread = -1
     maxThread = 0
@@ -294,9 +305,9 @@ def main():
                 if currentTrace.api == "API_GL":
                     setupwriter = glxSpecial()
                     IncludeFilePointer, DataFilePointer = setupwriter.SetupWriteout()
-                    setupwriter.HandleSpecialCalls(returnedcall, IncludeFilePointer, DataFilePointer,  arraycounter)
+                    arraycounter += setupwriter.HandleSpecialCalls(returnedcall, IncludeFilePointer, DataFilePointer,  arraycounter)
             else:
-                setupwriter.HandleSpecialCalls(returnedcall, IncludeFilePointer, DataFilePointer,  arraycounter)
+                arraycounter += setupwriter.HandleSpecialCalls(returnedcall, IncludeFilePointer, DataFilePointer,  arraycounter)
 
         except:
             ###

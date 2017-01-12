@@ -447,9 +447,15 @@ void frame_0();
         return IncludeFilePointer,  DataFilePointer
 
     def HandleSpecialCalls(self,  call,  IncludeFilePointer,  DataFilePointer,  arraycounter):
+        rVal = 0
         if "glXChooseFBConfig" in call.name:
             for i in range(0, len(call.returnValue[0])):
                 IncludeFilePointer.write("#define config_" + format(call.returnValue[0][i][0], '08x') + " (_array_" + str(arraycounter) + "_p[" + str(i) + "])\n")
+
+            IncludeFilePointer.write("extern GLXFBConfig* _array_"+ str(arraycounter) + "_p;\n")
+            DataFilePointer.write("GLXFBConfig* _array_"+ str(arraycounter) + "_p;\n")
+            call.returnValue = (str("_array_"+ str(arraycounter) + "_p"),  "TYPE_OPAQUE")
+            rVal = 1
 
         if "glXGetFBConfigAttrib" in call.name:
             p = call.paramValues[1][0]
@@ -504,3 +510,5 @@ void frame_0();
             p = call.paramValues[2][0]
             if "NULL" not in str(p):
                 call.paramValues[2] = (str("context_" + format(p, '08x')),  "TYPE_OPAQUE")
+
+        return rVal
