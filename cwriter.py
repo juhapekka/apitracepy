@@ -212,10 +212,6 @@ def handleArray(call,  index):
 def handleResources(call):
     nimi = ""
 
-    listOfHandlets = [ ("glCreateProgram",  "programs_", "GLuint "), 
-                               ("glCreateShader", "shader_", "GLuint "), 
-                               ("glFenceSync", "sync_", "GLsync ")]
-
     if call.returnValue != None and call.returnValue[1] == "TYPE_OPAQUE":
         p = call.returnValue[0]
         if "NULL" not in str(p) and str(p).isdigit() == True:
@@ -224,23 +220,16 @@ def handleResources(call):
             if nimi not in writtenBlobs and nimi != "":
                 writtenBlobs.append(nimi)
 
-    if call.returnValue != None and call.returnValue[1] == "TYPE_INT":
-        for item in listOfHandlets:
-            if item[0] in call.name:
-                nimi = item[1] +str(call.returnValue[0])
-                call.returnValue = nimi
-                if nimi not in writtenBlobs and nimi != "":
-                    writtenBlobs.append(nimi)
-
-    for i in range(0,  call.paramAmount):
-        if len(call.paramValues) >= i:
-            if call.paramNames[i] == "dest":
-                p = (str("dest_" + format(call.paramValues[i][0], '08x')),  "TYPE_OPAQUE")
-                call.paramValues[i] = p
+#    for i in range(0,  call.paramAmount):
+#        if len(call.paramValues) >= i:
+#            if call.paramNames[i] == "dest":
+#                p = (str("dest_" + format(call.paramValues[i][0], '08x')),  "TYPE_OPAQUE")
+#                call.paramValues[i] = p
 
     return
 
 def specialCalls(call):
+    global arraycounter
     if "glViewport" in call.name:
         th = call.threadID
 
@@ -257,7 +246,62 @@ def specialCalls(call):
             for i in range(0,  len(screensizes)):
                 if screensizes[i][0] is th:
                     screensizes[i] = a
-            
+        return
+
+    createcalls = [("glCreateProgram", "programs_", "GLuint "),
+                   ("glCreateShader", "shader_", "GLuint "),
+                   ("glMapBuffer", "dest_", "void* "),
+                   ("glMapBufferRange", "dest_", "void* "),
+                   ("glFenceSync", "sync_", "GLsync ")]
+    for i in createcalls:
+        if i[0] == call.name:
+            rValString = i[1] + str(call.returnValue[0])
+            call.returnValue = (rValString, "TYPE_OPAQUE")
+            if rValString not in writtenBlobs and rValString != "":
+                writtenBlobs.append(rValString)
+                IncludeFilePointer.write("extern " + i[2]+ " " + rValString + ";\n")
+                DataFilePointer.write(i[2]+ " " + rValString + ";\n")
+
+    ignorecalls = ["glDeleteSync"]
+    
+    if call.name.startswith("glGen") or call.name.startswith("glDelete") and call.name not in ignorecalls:
+        if call.name.startswith("glGenerate"):
+            return
+        elif call.name.endswith("Lists"):
+            if call.name.startswith("glGen"):
+                nimi = "lista_" + str(arraycounter)
+                DataFilePointer.write( "GLuint " + nimi + ";\n")
+                IncludeFilePointer.write("extern GLuint " + nimi + ";\n")
+                basevalue = int(call.returnValue[0])
+                for i in range (0, int(call.paramValues[0][0])):
+                    nimi2 = "list_" + str(basevalue+i)
+                    IncludeFilePointer.write("#define " + nimi2 + " " + nimi + "+" + str(i) + "\n")
+                call.returnValue = (str(nimi), "TYPE_OPAQUE")
+                arraycounter = arraycounter+1
+        else:
+            counter = call.paramValues[0][0]
+            for i in range(0, counter):
+                valString = call.paramNames[1] + "_" + str(call.paramValues[1][0][i][0])
+                if valString not in writtenBlobs and valString != "":
+                    writtenBlobs.append(valString)
+                    IncludeFilePointer.write("#define " +valString+ " " + str("_array_"+ str(arraycounter) + "_p[") + str(i) + "]\n")
+#        call.paramNames[1] = ""
+        return
+
+    specialParamNames = [("program", "programs_"),
+                         ("dest", "dest_"),
+                         ("buffer", "buffer_"), 
+                         ("shader", "shader_"), 
+                         ("sync", "sync_"), 
+                         ("list", "list_")]
+    
+#    if "glCompileShader" in call.name:
+#        print "jee"
+        
+    for i in range(0, len(call.paramNames)):
+        for j in specialParamNames:
+            if str(call.paramNames[i]) == str(j[0]):
+                call.paramValues[i] =  ((str(j[1]) + str(call.paramValues[i][0])), "TYPE_OPAQUE")
 
 def outputSpecialParams():
     for i in range(0,  len(screensizes)):
@@ -265,7 +309,7 @@ def outputSpecialParams():
         IncludeFilePointer.write("#define wheight_" + str(screensizes[i][0]) + " "  + str(screensizes[i][1][1]) + "\n")
 
 def ignoreCall(call):
-    listOfCallsToIgnore = ["glXGetSwapIntervalMESA"]
+    listOfCallsToIgnore = ["glXSwapIntervalMESA"]
     if call.name in listOfCallsToIgnore:
         return True
     return False
@@ -309,6 +353,10 @@ def main():
             else:
                 arraycounter += setupwriter.HandleSpecialCalls(returnedcall, IncludeFilePointer, DataFilePointer,  arraycounter)
 
+#        except Exception as ex:
+#            template = "An exception of type {0} occured. Arguments:\n{1!r}"
+#            message = template.format(type(ex).__name__, ex.args)
+#            print message
         except:
             ###
             # exit from parsing the file

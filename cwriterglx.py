@@ -26,8 +26,7 @@
 """
 
 class glxSpecial:
-    stubSource = """
-    #include <stdio.h>
+    stubSource = """#include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
 
@@ -39,10 +38,6 @@ Window     xWin;
 
 pthread_t 		tid[max_thread];
 sem_t 			lock[max_thread];
-
-#ifdef use_glXCreateContextAttribsARB
-typedef GLXContext (*GLXCREATECONTEXTATTRIBSARBPROC)(Display*, GLXFBConfig, GLXContext, Bool, const int*);
-#endif
 
 void* run_trace(void* arg)
 {
@@ -78,17 +73,9 @@ static int xerrorhandler(Display *dpy, XErrorEvent *error)
 int main(int argc, char *argv[])
 {
 	XEvent                event;
-//	XVisualInfo          *vInfo;
 	XSetWindowAttributes  swa;
 	int                   swaMask;
 	int                   c;
-#ifdef use_glXChooseFBConfig
-	int                   fbc_amount, chosen_fbc = -1, best_samples = -1, samp_buf, samples;
-	GLXFBConfig          *fbc;
-#endif
-#ifdef use_glXCreateContextAttribsARB
-	GLXCREATECONTEXTATTRIBSARBPROC glXCreateContextAttribsARB;
-#endif
 
 	load_all_blobs;
 
@@ -100,265 +87,41 @@ int main(int argc, char *argv[])
 
 	XSetErrorHandler(xerrorhandler);
 
-#ifdef use_glXChooseFBConfig
-	fbc = glXChooseFBConfig(display, DefaultScreen(display),
-							glx_visual_params0, &fbc_amount);
-
-	if (fbc == 0) {
-                printf( "Not able to find matching framebuffer\\n" );
-		exit( EXIT_FAILURE );
-	}
-	for (c = 0; c < fbc_amount; c++) {
-		vInfo = glXGetVisualFromFBConfig(display, fbc[c]);
-		if (vInfo) {
-			glXGetFBConfigAttrib(display, fbc[c], GLX_SAMPLE_BUFFERS, &samp_buf);
-			glXGetFBConfigAttrib(display, fbc[c], GLX_SAMPLES, &samples);
-
-#ifdef DEBUG
-                        printf("GLXFBConfig %d, id 0x%2x sample buffers %d, samples = %d\\n", c, (unsigned int)vInfo->visualid, samp_buf, samples );
-#endif
-
-		if (chosen_fbc < 0 || (samp_buf && samples > best_samples))
-			chosen_fbc = c, best_samples = samples;
-		}
-		XFree(vInfo);
-	}
-	vInfo = glXGetVisualFromFBConfig(display, fbc[chosen_fbc]);
-#ifdef DEBUG
-        printf("chosen visual = 0x%x\\n", (unsigned int)vInfo->visualid);
-#endif
-#else
-//	vInfo = glXChooseVisual(display, 0, glx_visual_params0);
-#endif
-
-//	swa.colormap = XCreateColormap( display, RootWindow(display, vInfo->screen),
-//							vInfo->visual, AllocNone );
 	swa.event_mask = StructureNotifyMask;
-	swaMask = /*CWColormap | */CWEventMask;
+	swaMask = CWEventMask;
 
 	xWin = XCreateWindow(display, XRootWindow(display,DefaultScreen(display)), 0, 0, wwidth_0, wheight_0,
 		0, DefaultDepth(display,DefaultScreen(display)), InputOutput, DefaultVisual(display,DefaultScreen(display)),
 		swaMask, &swa);
 
-#ifdef use_glXCreateContextAttribsARB
-	glXCreateContextAttribsARB = (GLXCREATECONTEXTATTRIBSARBPROC) 
-		glXGetProcAddress((const GLubyte*)"glXCreateContextAttribsARB");
-
-	context = glXCreateContextAttribsARB(display, fbc[chosen_fbc], NULL, True,
-			ContextAttribsARB0);
-#else
-//	context = glXCreateContext( display, vInfo, NULL, True );
-#endif
-#ifdef use_glXChooseFBConfig
-	XFree(fbc);
-#endif
-
 	XMapWindow(display, xWin);
 	XIfEvent(display, &event, WaitForNotify, (XPointer) xWin);
-
-//	glXMakeCurrent(display, xWin, context);
 
 	/*
 	* Setup done. Now go to the trace.
 	*/
 	for( c = 0; c < max_thread; c++ )
-	{
 		sem_init(&lock[c], 0, 0);
-	}
+
 	for( c = 0; c < max_thread; c++ )
-	{
 		pthread_create(&(tid[c]), NULL, &run_trace, NULL);
-	
-	}
-	
-	sem_post(&lock[0]);
+
 	for( c = 0; c < max_thread; c++ )
 	{
+		sem_post(&lock[c]);
 		pthread_join(tid[c], NULL);	
 	}
 
-//	glXMakeContextCurrent(display, 0, 0, 0);
-//	glXDestroyContext(display, context);
 	XDestroyWindow(display, xWin);
-//	XFree(vInfo);
 	XCloseDisplay(display);
-
 	free_all_blobs;
-
-	exit( EXIT_SUCCESS );
-
-	(void)argc;
-	(void)argv;
-}
-    """
-    
-    
-    
-    
-    """#include <stdio.h>
-#include <stdlib.h>
-#include <pthread.h>
-
-#include "includes.h"
-
-Display   *display;
-GLXContext context;
-Window     xWin;
-
-pthread_t 		tid[max_thread];
-sem_t 			lock[max_thread];
-
-#ifdef use_glXCreateContextAttribsARB
-typedef GLXContext (*GLXCREATECONTEXTATTRIBSARBPROC)(Display*, GLXFBConfig, GLXContext, Bool, const int*);
-#endif
-
-void* run_trace(void* arg)
-{
-	pthread_t id;
-	int this_thread = -1, c;
-	
-	id = pthread_self();
-	for( c = 0; c < max_thread; c++ ) {
-		if(pthread_equal(id, tid[c])) {
-			this_thread = c;
-			break;
-		}
-	}
-	sem_wait(&lock[this_thread]);
-	
-	call_all_frames
-	return NULL;
-}
-
-static Bool WaitForNotify( Display *dpy, XEvent *event, XPointer arg ) {
-	return (event->type == MapNotify) && (event->xmap.window == (Window) arg);
-	(void)dpy;
-}
-
-static int xerrorhandler(Display *dpy, XErrorEvent *error)
-{
-	char retError[256];
-	XGetErrorText(dpy, error->error_code, retError, sizeof(retError));
-        fprintf(stderr, "Fatal error from X: %s\\n", (char*)&retError);
-	exit( EXIT_FAILURE);
-}
-
-int main(int argc, char *argv[])
-{
-	XEvent                event;
-	XVisualInfo          *vInfo;
-	XSetWindowAttributes  swa;
-	int                   swaMask;
-	int                   c;
-#ifdef use_glXChooseFBConfig
-	int                   fbc_amount, chosen_fbc = -1, best_samples = -1, samp_buf, samples;
-	GLXFBConfig          *fbc;
-#endif
-#ifdef use_glXCreateContextAttribsARB
-	GLXCREATECONTEXTATTRIBSARBPROC glXCreateContextAttribsARB;
-#endif
-
-	load_all_blobs;
-
-	display = XOpenDisplay(NULL);
-	if (display == NULL) {
-                printf( "Unable to open a connection to the X server\\n" );
-		exit( EXIT_FAILURE );
-	}
-
-	XSetErrorHandler(xerrorhandler);
-
-#ifdef use_glXChooseFBConfig
-	fbc = glXChooseFBConfig(display, DefaultScreen(display),
-							glx_visual_params0, &fbc_amount);
-
-	if (fbc == 0) {
-                printf( "Not able to find matching framebuffer\\n" );
-		exit( EXIT_FAILURE );
-	}
-	for (c = 0; c < fbc_amount; c++) {
-		vInfo = glXGetVisualFromFBConfig(display, fbc[c]);
-		if (vInfo) {
-			glXGetFBConfigAttrib(display, fbc[c], GLX_SAMPLE_BUFFERS, &samp_buf);
-			glXGetFBConfigAttrib(display, fbc[c], GLX_SAMPLES, &samples);
-
-#ifdef DEBUG
-                        printf("GLXFBConfig %d, id 0x%2x sample buffers %d, samples = %d\\n", c, (unsigned int)vInfo->visualid, samp_buf, samples );
-#endif
-
-		if (chosen_fbc < 0 || (samp_buf && samples > best_samples))
-			chosen_fbc = c, best_samples = samples;
-		}
-		XFree(vInfo);
-	}
-	vInfo = glXGetVisualFromFBConfig(display, fbc[chosen_fbc]);
-#ifdef DEBUG
-        printf("chosen visual = 0x%x\\n", (unsigned int)vInfo->visualid);
-#endif
-#else
-	vInfo = glXChooseVisual(display, 0, glx_visual_params0);
-#endif
-
-	swa.colormap = XCreateColormap( display, RootWindow(display, vInfo->screen),
-							vInfo->visual, AllocNone );
-	swa.event_mask = StructureNotifyMask;
-	swaMask = CWColormap | CWEventMask;
-
-	xWin = XCreateWindow(display, RootWindow(display, vInfo->screen), 0, 0, screensize0[0], screensize0[1],
-		0, vInfo->depth, InputOutput, vInfo->visual,
-		swaMask, &swa);
-
-#ifdef use_glXCreateContextAttribsARB
-	glXCreateContextAttribsARB = (GLXCREATECONTEXTATTRIBSARBPROC) 
-		glXGetProcAddress((const GLubyte*)"glXCreateContextAttribsARB");
-
-	context = glXCreateContextAttribsARB(display, fbc[chosen_fbc], NULL, True,
-			ContextAttribsARB0);
-#else
-	context = glXCreateContext( display, vInfo, NULL, True );
-#endif
-#ifdef use_glXChooseFBConfig
-	XFree(fbc);
-#endif
-
-	XMapWindow(display, xWin);
-	XIfEvent(display, &event, WaitForNotify, (XPointer) xWin);
-
-	glXMakeCurrent(display, xWin, context);
-
-	/*
-	* Setup done. Now go to the trace.
-	*/
-	for( c = 0; c < max_thread; c++ )
-	{
-		sem_init(&lock[c], 0, 0);
-	}
-	for( c = 0; c < max_thread; c++ )
-	{
-		pthread_create(&(tid[c]), NULL, &run_trace, NULL);
-	
-	}
-	
-	sem_post(&lock[0]);
-	for( c = 0; c < max_thread; c++ )
-	{
-		pthread_join(tid[c], NULL);	
-	}
-
-	glXMakeContextCurrent(display, 0, 0, 0);
-	glXDestroyContext(display, context);
-	XDestroyWindow(display, xWin);
-	XFree(vInfo);
-	XCloseDisplay(display);
-
-	free_all_blobs;
-
 	exit( EXIT_SUCCESS );
 
 	(void)argc;
 	(void)argv;
 }
 """
+
     MakefileString="""CC = gcc
 
 CFLAGS=$(shell pkg-config --cflags gl x11 glu) -Wall -ansi -O0 --std=c99
@@ -402,6 +165,7 @@ extern Window xWin;
 extern sem_t lock[];
 
 extern GLuint _programs_0;
+#define buffer_0 0
 void frame_0();
 
 
@@ -474,11 +238,17 @@ void frame_0();
 
 
         if "glXCreateContextAttribsARB" in call.name:
+            strstr = """typedef GLXContext (*GLXCREATECONTEXTATTRIBSARBPROC)(Display*, GLXFBConfig, GLXContext, Bool, const int*);
+\t\tGLXCREATECONTEXTATTRIBSARBPROC glXCreateContextAttribsARB;
+\t\tglXCreateContextAttribsARB = (GLXCREATECONTEXTATTRIBSARBPROC) 
+\t\tglXGetProcAddress((const GLubyte*)"glXCreateContextAttribsARB");\n\t\t"""
             p = call.paramValues[1][0]
             call.paramValues[1] = (str("config_" + format(p, '08x')),  "TYPE_OPAQUE")
             p = call.returnValue[0]
             ctxName = str("context_" + format(p, '08x'))
-            call.returnValue = (ctxName,  "TYPE_OPAQUE")
+            call.returnValue = (strstr+ctxName,  "TYPE_OPAQUE")
+
+            
             IncludeFilePointer.write("extern GLXContext " + ctxName + ";\n")
             DataFilePointer.write("GLXContext " + ctxName + ";\n")
         elif "glXCreateContext" in call.name:
@@ -498,6 +268,9 @@ void frame_0();
             DataFilePointer.write("GLXContext " + ctxName + ";\n")
             p = call.paramValues[1][0]
             call.paramValues[1] = (str("config_" + format(p, '08x')),  "TYPE_OPAQUE")
+            if call.paramValues[3][1] != "TYPE_NULL":
+                shareName = str("context_" + format(call.paramValues[3][0], '08x'))
+                call.paramValues[3] = (shareName,  "TYPE_OPAQUE")
 
         if "glXChooseVisual" in call.name:
             p = call.returnValue[0][0][0][0][0][0]
