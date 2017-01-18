@@ -284,4 +284,9 @@ void frame_0();
             if "NULL" not in str(p):
                 call.paramValues[2] = (str("context_" + format(p, '08x')),  "TYPE_OPAQUE")
 
+        if "glXDestroyContext" in call.name:
+            p = call.paramValues[1][0]
+            if "NULL" not in str(p):
+                call.paramValues[1] = (str("context_" + format(p, '08x')),  "TYPE_OPAQUE")
+
         return rVal

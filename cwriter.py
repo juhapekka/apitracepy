@@ -28,6 +28,7 @@
 
 import sys
 import hashlib
+import string
 from apitrace import cTraceFile,  cTraceCall
 IncludeFilePointer = None
 DataFilePointer = None
@@ -126,9 +127,11 @@ def handleArray_String(call,  index, Value):
 
     paramindex = 64738
 
-    for i in range(0, len(call.paramValues[index])):
-        if call.paramValues[index][i][0][0] == Value:
+    for i in range(0, len(call.paramValues[index][0])):
+        if call.paramValues[index][0][i][0] == Value:
             paramindex = i
+            break
+#    print call.paramValues[index][paramindex][0][0]
 
     strname = "_string_"+ str(arraycounter) + "_" + str(paramindex)
 
@@ -196,6 +199,8 @@ def handleArray(call,  index):
                 writeouttype = "char*"
             if item[1] == "TYPE_FLOAT":
                 writeouttype = "float"
+                if str("inf") in str(rVal):
+                    rVal = string.replace(rVal, "inf", "INFINITY")
         except:
             rVal = "\"" + item[1] + " not implemented yet" + "\""
 
@@ -219,12 +224,6 @@ def handleResources(call):
             call.returnValue = (nimi, "TYPE_OPAQUE")
             if nimi not in writtenBlobs and nimi != "":
                 writtenBlobs.append(nimi)
-
-#    for i in range(0,  call.paramAmount):
-#        if len(call.paramValues) >= i:
-#            if call.paramNames[i] == "dest":
-#                p = (str("dest_" + format(call.paramValues[i][0], '08x')),  "TYPE_OPAQUE")
-#                call.paramValues[i] = p
 
     return
 
@@ -262,7 +261,7 @@ def specialCalls(call):
                 IncludeFilePointer.write("extern " + i[2]+ " " + rValString + ";\n")
                 DataFilePointer.write(i[2]+ " " + rValString + ";\n")
 
-    ignorecalls = ["glDeleteSync"]
+    ignorecalls = ["glDeleteSync", "glDeleteShader",  "glDeleteProgram"]
     
     if call.name.startswith("glGen") or call.name.startswith("glDelete") and call.name not in ignorecalls:
         if call.name.startswith("glGenerate"):
@@ -285,31 +284,32 @@ def specialCalls(call):
                 if valString not in writtenBlobs and valString != "":
                     writtenBlobs.append(valString)
                     IncludeFilePointer.write("#define " +valString+ " " + str("_array_"+ str(arraycounter) + "_p[") + str(i) + "]\n")
-#        call.paramNames[1] = ""
         return
 
     specialParamNames = [("program", "programs_"),
+                         ("texture",  "texture_"), 
                          ("dest", "dest_"),
                          ("buffer", "buffer_"), 
                          ("shader", "shader_"), 
                          ("sync", "sync_"), 
                          ("list", "list_")]
-    
-#    if "glCompileShader" in call.name:
-#        print "jee"
-        
+
     for i in range(0, len(call.paramNames)):
         for j in specialParamNames:
             if str(call.paramNames[i]) == str(j[0]):
-                call.paramValues[i] =  ((str(j[1]) + str(call.paramValues[i][0])), "TYPE_OPAQUE")
+                paramfullname = str(j[1]) + str(call.paramValues[i][0])
+                if paramfullname not in writtenBlobs:
+                    writtenBlobs.append(paramfullname)
+                    IncludeFilePointer.write("#define " + paramfullname + " " + str(call.paramValues[i][0]) + "\n")
+                call.paramValues[i] =  (paramfullname, "TYPE_OPAQUE")
 
 def outputSpecialParams():
     for i in range(0,  len(screensizes)):
         IncludeFilePointer.write("#define wwidth_" + str(screensizes[i][0]) + " "  + str(screensizes[i][1][0]) + "\n")
         IncludeFilePointer.write("#define wheight_" + str(screensizes[i][0]) + " "  + str(screensizes[i][1][1]) + "\n")
 
-def ignoreCall(call):
-    listOfCallsToIgnore = ["glXSwapIntervalMESA"]
+def commentoutCall(call):
+    listOfCallsToIgnore = ["glXSwapIntervalMESA", "glReadPixels"]
     if call.name in listOfCallsToIgnore:
         return True
     return False
@@ -331,8 +331,6 @@ def main():
         print ("usage: cwriter.py <tracefile>")
         sys.exit(1)
 
-    print ("trace file version ", currentTrace.version)
-
 ########
 # main loop
 
@@ -341,7 +339,7 @@ def main():
         try:
             call = cTraceCall(currentTrace)
             returnedcall = call.parseCall()
-            
+
             wasFirstCall = newFile()
             specialCalls(returnedcall)
 
@@ -407,26 +405,31 @@ def main():
                             paramlist += handleArray(returnedcall,  i)
                         elif returnedcall.paramValues[i][1] == "TYPE_STRING":
                             paramlist += "\"" + str(returnedcall.paramValues[i][0]) + "\""
+                        elif returnedcall.paramValues[i][1] == "TYPE_FLOAT" or returnedcall.paramValues[i][1] == "TYPE_DOUBLE":
+                            paramlist += string.replace(str(returnedcall.paramValues[i][0]), "inf", "INFINITY")
                         else:
                             paramlist += str(returnedcall.paramValues[i][0])
+
                     if i < returnedcall.paramAmount-1:
                         paramlist += ", "
             paramlist += ")"
 
-            if ignoreCall(returnedcall) != True:
-                currentlyWritingFile.write("\t\t")
+            if commentoutCall(returnedcall) is True:
+                currentlyWritingFile.write("//")
 
-                i = currentTrace.filePointer*20/currentTrace.fileSize
-                sys.stdout.write('\r')
-                if returnedcall.callNumber % 40 == 0:
-                    sys.stdout.write("[%-20s] %d%% Current Frame: %d" % ('#'*i, 5*i,  currentFrame))
-                    sys.stdout.flush()
+            currentlyWritingFile.write("\t\t")
 
-                if returnedcall.returnValue != None and returnedcall.returnValue[1] == "TYPE_OPAQUE":
-                    currentlyWritingFile.write(str(returnedcall.returnValue[0]) + " = ")
+            i = currentTrace.filePointer*20/currentTrace.fileSize
+            sys.stdout.write('\r')
+            if returnedcall.callNumber % 40 == 0:
+                sys.stdout.write("[%-20s] %d%% Current Frame: %d" % ('#'*i, 5*i,  currentFrame))
+                sys.stdout.flush()
 
-                currentlyWritingFile.write(str(returnedcall.name + paramlist+";\n"))
-                currentlyWritingFile.flush()
+            if returnedcall.returnValue != None and returnedcall.returnValue[1] == "TYPE_OPAQUE":
+                currentlyWritingFile.write(str(returnedcall.returnValue[0]) + " = ")
+
+            currentlyWritingFile.write(str(returnedcall.name + paramlist+";\n"))
+            currentlyWritingFile.flush()
 
 
         if "SwapBuffers" in returnedcall.name:
