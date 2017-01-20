@@ -164,7 +164,6 @@ extern Window xWin;
 
 extern sem_t lock[];
 
-extern GLuint _programs_0;
 #define buffer_0 0
 void frame_0();
 
@@ -200,7 +199,6 @@ void frame_0();
         DataFilePointer = open("data.c", "w")
         DataFilePointer.truncate()
         DataFilePointer.write("#include \"includes.h\"\n")
-        DataFilePointer.write("\nGLuint programs_0 = 0;\n")
 
         StubFilePointer = open( "main.c" , "w" )
         StubFilePointer.truncate()
