@@ -182,7 +182,7 @@ void frame_0();
 
 
 """
-         
+
     def SetupWriteout(self):
         global IncludeFilePointer, DataFilePointer
 
