@@ -131,7 +131,6 @@ def handleArray_String(call,  index, Value):
         if call.paramValues[index][0][i][0] == Value:
             paramindex = i
             break
-#    print call.paramValues[index][paramindex][0][0]
 
     strname = "_string_"+ str(arraycounter) + "_" + str(paramindex)
 
@@ -163,22 +162,8 @@ def handleArray_Struct(Value):
 
 def handleArray(call,  index):
     switches = {
-        "TYPE_NULL": "NULL",
-        "TYPE_FALSE": "False",
-        "TYPE_TRUE": "True",
-        "TYPE_SINT": lambda call,  paramindex,  paramvalue : paramvalue,
-        "TYPE_UINT": lambda call,  paramindex,  paramvalue : paramvalue,
-        "TYPE_FLOAT": lambda call,  paramindex,  paramvalue : paramvalue,
-        "TYPE_DOUBLE": lambda call,  paramindex,  paramvalue : paramvalue,
         "TYPE_STRING": lambda call,  paramindex,  paramvalue : handleArray_String(call,  paramindex,  paramvalue),
-#        "TYPE_BLOB": lambda : (self.stringReader(), "TYPE_BLOB"),
-        "TYPE_ENUM": lambda call,  paramindex,  paramvalue : paramvalue, 
-        "TYPE_BITMASK": lambda call,  paramindex,  paramvalue : paramvalue,
-#        "TYPE_ARRAY": lambda : (self.arrayReader(), "TYPE_ARRAY"),
         "TYPE_STRUCT": lambda call,  paramindex,  paramvalue : handleArray_Struct(paramvalue),
-        "TYPE_OPAQUE": lambda call,  paramindex,  paramvalue : paramvalue,
-#        "TYPE_REPR": lambda : (self.readRepr(), "TYPE_REPR"),
-#        "TYPE_WSTRING": lambda : (self.readWString(), "TYPE_WSTRING")
     }
 
     global IncludeFilePointer, DataFilePointer,  arraycounter
@@ -195,14 +180,14 @@ def handleArray(call,  index):
         arraytext += arraybreaker
         try:
             rVal = switches[item[1]](call, index,  item[0])
-            if item[1] == "TYPE_STRING":
-                writeouttype = "char*"
-            if item[1] == "TYPE_FLOAT":
-                writeouttype = "float"
-                if str("inf") in str(rVal):
-                    rVal = string.replace(rVal, "inf", "INFINITY")
         except:
-            rVal = "\"" + item[1] + " not implemented yet" + "\""
+            rVal = item[0]
+        if item[1] == "TYPE_STRING":
+            writeouttype = "char*"
+        if item[1] == "TYPE_FLOAT":
+            writeouttype = "float"
+            if str("inf") in str(rVal):
+                rVal = string.replace(str(rVal), "inf", "INFINITY")
 
         arraytext += str(rVal)
         arraybreaker = ", "
