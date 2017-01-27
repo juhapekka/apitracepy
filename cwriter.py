@@ -122,17 +122,10 @@ def writeoutMemoryMacro():
 
     IncludeFilePointer.write(str("\n\n"))
 
-def handleArray_String(call,  index, Value):
+def handleArray_String(call, index, Value,  arrayindex):
     global IncludeFilePointer, DataFilePointer, arraycounter
 
-    paramindex = 64738
-
-    for i in range(0, len(call.paramValues[index][0])):
-        if call.paramValues[index][0][i][0] == Value:
-            paramindex = i
-            break
-
-    strname = "_string_"+ str(arraycounter) + "_" + str(paramindex)
+    strname = "_string_"+ str(arraycounter) + "_" + str(arrayindex)
 
     if strname not in writtenBlobs and strname!= "":
         IncludeFilePointer.write("extern char* " + strname+ ";\n")
@@ -154,7 +147,6 @@ def handleArray_Struct(Value):
         structbreaker = ", "
 
     structtext += "};"
-    print structtext
     IncludeFilePointer.write("extern GLuint " + strname + "[];\n")
     DataFilePointer.write("GLuint " + strname + "[] = " + structtext+ "\n")
     return strname
@@ -162,8 +154,8 @@ def handleArray_Struct(Value):
 
 def handleArray(call,  index):
     switches = {
-        "TYPE_STRING": lambda call,  paramindex,  paramvalue : handleArray_String(call,  paramindex,  paramvalue),
-        "TYPE_STRUCT": lambda call,  paramindex,  paramvalue : handleArray_Struct(paramvalue),
+        "TYPE_STRING": lambda call,  paramindex,  paramvalue, arrayindex : handleArray_String(call,  paramindex,  paramvalue, arrayindex),
+        "TYPE_STRUCT": lambda call,  paramindex,  paramvalue, arrayindex : handleArray_Struct(paramvalue),
     }
 
     global IncludeFilePointer, DataFilePointer,  arraycounter
@@ -175,17 +167,22 @@ def handleArray(call,  index):
     writeouttype = "GLuint"
     arraytext = "{"
     arraybreaker = ""
-    for item in call.paramValues[index][0]:
+    for i in range(0, len(call.paramValues[index][0])):
+        item = call.paramValues[index][0][i]
         rVal = ""
         arraytext += arraybreaker
         try:
-            rVal = switches[item[1]](call, index,  item[0])
+            rVal = switches[item[1]](call, index,  item[0], i)
         except:
             rVal = item[0]
         if item[1] == "TYPE_STRING":
             writeouttype = "char*"
         if item[1] == "TYPE_FLOAT":
             writeouttype = "float"
+            if str("inf") in str(rVal):
+                rVal = string.replace(str(rVal), "inf", "INFINITY")
+        if item[1] == "TYPE_DOUBLE":
+            writeouttype = "double"
             if str("inf") in str(rVal):
                 rVal = string.replace(str(rVal), "inf", "INFINITY")
 
