@@ -122,7 +122,7 @@ def writeoutMemoryMacro():
 
     IncludeFilePointer.write(str("\n\n"))
 
-def handleArray_String(call, index, Value,  arrayindex):
+def handleArray_String(call, Value,  arrayindex):
     global IncludeFilePointer, DataFilePointer, arraycounter
 
     strname = "_string_"+ str(arraycounter) + "_" + str(arrayindex)
@@ -154,8 +154,8 @@ def handleArray_Struct(Value):
 
 def handleArray(call,  index):
     switches = {
-        "TYPE_STRING": lambda call,  paramindex,  paramvalue, arrayindex : handleArray_String(call,  paramindex,  paramvalue, arrayindex),
-        "TYPE_STRUCT": lambda call,  paramindex,  paramvalue, arrayindex : handleArray_Struct(paramvalue),
+        "TYPE_STRING": lambda call, paramvalue, arrayindex : handleArray_String(call, paramvalue, arrayindex),
+        "TYPE_STRUCT": lambda call, paramvalue, arrayindex : handleArray_Struct(paramvalue),
     }
 
     global IncludeFilePointer, DataFilePointer,  arraycounter
@@ -172,7 +172,7 @@ def handleArray(call,  index):
         rVal = ""
         arraytext += arraybreaker
         try:
-            rVal = switches[item[1]](call, index,  item[0], i)
+            rVal = switches[item[1]](call, item[0], i)
         except:
             rVal = item[0]
         if item[1] == "TYPE_STRING":
