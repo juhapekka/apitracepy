@@ -229,6 +229,15 @@ def specialCalls(call):
                     screensizes[i] = a
         return
 
+    p_list_changeling = [ ["glVertexAttribPointer", 5, "(const GLvoid*) "],
+                          ["glDrawElements", 3,  "(const GLvoid*) "],
+                          ]
+
+    for i in p_list_changeling :
+        if i[0] in call.name:
+            specialparam = str(i[2]) + str(call.paramValues[i[1]][0])
+            call.paramValues[i[1]] = (specialparam,  "TYPE_OPAQUE")
+
     createcalls = [("glCreateProgram", "programs_", "GLuint "),
                    ("glCreateShader", "shader_", "GLuint "),
                    ("glMapBuffer", "dest_", "void* "),
