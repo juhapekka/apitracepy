@@ -231,7 +231,7 @@ def specialCalls(call):
 
     p_list_changeling = [ ["glVertexAttribPointer", 5, "(const GLvoid*) "],
                           ["glDrawElements", 3,  "(const GLvoid*) "],
-                          ["glUniform4iv", 2, "(const GLint*) "]
+#                          ["glUniform4iv", 2, "(const GLint*) "]
                           ]
 
     for i in p_list_changeling :
