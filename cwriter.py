@@ -29,6 +29,7 @@
 import sys
 import hashlib
 import string
+from array import array
 from apitrace import cTraceFile,  cTraceCall
 IncludeFilePointer = None
 DataFilePointer = None
@@ -64,16 +65,19 @@ def closeFile():
     currentlyWritingFile = None
 
 def printBlobName(blob):
-    hashobject = hashlib.sha1(blob)
+    hashobject = hashlib.sha1(blob.encode('utf-8'))
     hexdigit = hashobject.hexdigest()
     name_of_blob = "_blob_" + str(hexdigit) + "_" + str(len(blob))
     return name_of_blob
     
 def writeoutBlob(blobName,  blobi):
     global IncludeFilePointer, DataFilePointer
-    blobFilePointer = open( blobName , "w" )
+    blobFilePointer = open( blobName , "wb" )
     blobFilePointer.truncate()
-    blobFilePointer.write(blobi)
+    
+    a = array('b')
+    a.frombytes(blobi.encode())
+    blobFilePointer.write(a)
     blobFilePointer.close()
     blobFilePointer = None
     if blobName not in writtenBlobs:
@@ -398,7 +402,7 @@ def main():
                         elif returnedcall.paramValues[i][1] == "TYPE_STRING":
                             paramlist += "\"" + str(returnedcall.paramValues[i][0]) + "\""
                         elif returnedcall.paramValues[i][1] == "TYPE_FLOAT" or returnedcall.paramValues[i][1] == "TYPE_DOUBLE":
-                            paramlist += string.replace(str(returnedcall.paramValues[i][0]), "inf", "INFINITY")
+                            paramlist += str(returnedcall.paramValues[i][0]).replace("inf", "INFINITY")
                         else:
                             paramlist += str(returnedcall.paramValues[i][0])
 
@@ -411,7 +415,7 @@ def main():
 
             currentlyWritingFile.write("\t\t")
 
-            i = currentTrace.filePointer*20/currentTrace.fileSize
+            i = int(currentTrace.filePointer*20/currentTrace.fileSize)
             sys.stdout.write('\r')
             if returnedcall.callNumber % 40 == 0:
                 sys.stdout.write("[%-20s] %d%% Current Frame: %d" % ('#'*i, 5*i,  currentFrame))

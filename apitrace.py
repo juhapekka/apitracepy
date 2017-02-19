@@ -33,6 +33,7 @@ except:
 	print  ("couldn\'t import snappy, please install python-snappy package\n")
 
 import struct
+from array import array
 from effectables import effectables
 
 TRACE_VERSION = 5
@@ -90,7 +91,7 @@ class cTraceFile:
             self.container += 1
             self.mem = snappy.uncompress(compressedMem)
             self.containerPointer = 0
-        rval= ord(self.mem[self.containerPointer])
+        rval= self.mem[self.containerPointer]
         self.containerPointer += 1
         self.fullFilePosition += 1
         return rval
@@ -116,9 +117,13 @@ class cTraceFile:
 
     def floatReader(self,  size,  type):
         buf = ""
+
+        a = array('b')
         for i in range(0, size):
             buf += chr(self.getByte())
-        return float(struct.unpack(type, buf)[0])
+        a.frombytes(buf.encode())
+        s = struct.Struct(type)
+        return s.unpack_from(a, 0)[0]
 
     def sintReader(self):
         i = self.getByte()
@@ -274,7 +279,7 @@ class cTraceFile:
         self.mem = self.traceFile.read(2)
         self.filePointer += 2
 
-        if str(self.mem).startswith('at') != True:
+        if self.mem[0:2] != b'at':
             raise Exception("not snappy file!")
 
         length = int(struct.unpack('I', self.traceFile.read(4))[0])
