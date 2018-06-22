@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 # -*- coding: iso-8859-1 -*-
 
 """*************************************************************************
@@ -35,7 +35,12 @@ DataFilePointer = None
 currentlyWritingFile = None
 currentFrame = 0
 from cwriterglx import glxSpecial
-
+try:
+    from cwritersdl2 import sdl2Special
+except Exception as ex:
+    template = "An exception of type {0} occured. Arguments:\n{1!r}"
+    message = template.format(type(ex).__name__, ex.args)
+    print (message)
 arraycounter = 0
 
 writtenBlobs = []
@@ -64,16 +69,16 @@ def closeFile():
     currentlyWritingFile = None
 
 def printBlobName(blob):
-    hashobject = hashlib.sha1(blob)
+    hashobject = hashlib.sha1(str.encode(blob))
     hexdigit = hashobject.hexdigest()
     name_of_blob = "_blob_" + str(hexdigit) + "_" + str(len(blob))
     return name_of_blob
     
 def writeoutBlob(blobName,  blobi):
     global IncludeFilePointer, DataFilePointer
-    blobFilePointer = open( blobName , "w" )
+    blobFilePointer = open( blobName , "wb" )
     blobFilePointer.truncate()
-    blobFilePointer.write(blobi)
+    blobFilePointer.write(str.encode(blobi))
     blobFilePointer.close()
     blobFilePointer = None
     if blobName not in writtenBlobs:
@@ -229,15 +234,15 @@ def specialCalls(call):
                     screensizes[i] = a
         return
 
-    p_list_changeling = [ ["glVertexAttribPointer", 5, "(const GLvoid*) "],
-                          ["glDrawElements", 3,  "(const GLvoid*) "],
+#    p_list_changeling = [ ["glVertexAttribPointer", 5, "(const GLvoid*) "],
+#                          ["glDrawElements", 3,  "(const GLvoid*) "],
 #                          ["glUniform4iv", 2, "(const GLint*) "]
-                          ]
+#                          ]
 
-    for i in p_list_changeling :
-        if i[0] in call.name:
-            specialparam = str(i[2]) + str(call.paramValues[i[1]][0])
-            call.paramValues[i[1]] = (specialparam,  "TYPE_OPAQUE")
+#    for i in p_list_changeling :
+#        if i[0] in call.name:
+#            specialparam = str(i[2]) + str(call.paramValues[i[1]][0])
+#            call.paramValues[i[1]] = (specialparam,  "TYPE_OPAQUE")
 
     createcalls = [("glCreateProgram", "programs_", "GLuint "),
                    ("glCreateShader", "shader_", "GLuint "),
@@ -314,6 +319,7 @@ def main():
     currentlyWritingFile = None
     lastThread = -1
     maxThread = 0
+    useSDL2 = 0
     try:
         currentTrace = cTraceFile(sys.argv[1])
     except IOError:
@@ -323,6 +329,12 @@ def main():
         print ("usage: cwriter.py <tracefile>")
         sys.exit(1)
 
+    try:
+        if sys.argv[2] == "--sdl2":
+            useSDL2 = 1
+    except:
+        pass
+            
 ########
 # main loop
 
@@ -337,7 +349,11 @@ def main():
 
             if setupwriter is None:
                 if currentTrace.api == "API_GL":
-                    setupwriter = glxSpecial()
+                    if useSDL2 == 1:
+                        setupwriter = sdl2Special()
+                    else:
+                        setupwriter = glxSpecial()
+
                     IncludeFilePointer, DataFilePointer = setupwriter.SetupWriteout()
                     arraycounter += setupwriter.HandleSpecialCalls(returnedcall, IncludeFilePointer, DataFilePointer,  arraycounter)
             else:
@@ -398,7 +414,7 @@ def main():
                         elif returnedcall.paramValues[i][1] == "TYPE_STRING":
                             paramlist += "\"" + str(returnedcall.paramValues[i][0]) + "\""
                         elif returnedcall.paramValues[i][1] == "TYPE_FLOAT" or returnedcall.paramValues[i][1] == "TYPE_DOUBLE":
-                            paramlist += string.replace(str(returnedcall.paramValues[i][0]), "inf", "INFINITY")
+                            paramlist += str.replace(str(returnedcall.paramValues[i][0]), "inf", "INFINITY")
                         else:
                             paramlist += str(returnedcall.paramValues[i][0])
 
@@ -414,7 +430,7 @@ def main():
             i = currentTrace.filePointer*20/currentTrace.fileSize
             sys.stdout.write('\r')
             if returnedcall.callNumber % 40 == 0:
-                sys.stdout.write("[%-20s] %d%% Current Frame: %d" % ('#'*i, 5*i,  currentFrame))
+                sys.stdout.write("[%-20s] %d%% Current Frame: %d" % ('#'*int(i), 5*int(i),  currentFrame))
                 sys.stdout.flush()
 
             if returnedcall.returnValue != None and returnedcall.returnValue[1] == "TYPE_OPAQUE":
@@ -424,7 +440,7 @@ def main():
             currentlyWritingFile.flush()
 
 
-        if "SwapBuffers" in returnedcall.name:
+        if setupwriter.framebreak in returnedcall.name:
             closeFile()
             currentFrame = currentFrame+1
             lastThread = -1

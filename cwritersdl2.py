@@ -2,7 +2,7 @@
 # -*- coding: iso-8859-1 -*-
 
 """*************************************************************************
- * Copyright (C) 2016 Intel Corporation.   All Rights Reserved.
+ * Copyright (C) 2017 Intel Corporation.   All Rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -25,18 +25,21 @@
  ***************************************************************************/
 """
 
-class glxSpecial:
-    framebreak = "SwapBuffers"
-    
+class sdl2Special:
+    framebreak = "SDL_GL_SwapWindow"
+
     stubSource = """#include <stdio.h>
 #include <stdlib.h>
+#define GL3_PROTOTYPES 1
+#include <GL/glew.h>
+#include <SDL2/SDL.h>
 #include <pthread.h>
 
 #include "includes.h"
 
-Display   *display;
-GLXContext context;
-Window     xWin;
+SDL_Surface *display;
+SDL_GLContext ctx;
+SDL_Window *xWin;
 
 pthread_t 		tid[max_thread];
 sem_t 			lock[max_thread];
@@ -59,46 +62,31 @@ void* run_trace(void* arg)
 	return NULL;
 }
 
-static Bool WaitForNotify( Display *dpy, XEvent *event, XPointer arg ) {
-	return (event->type == MapNotify) && (event->xmap.window == (Window) arg);
-	(void)dpy;
-}
-
-static int xerrorhandler(Display *dpy, XErrorEvent *error)
-{
-	char retError[256];
-	XGetErrorText(dpy, error->error_code, retError, sizeof(retError));
-        fprintf(stderr, "Fatal error from X: %s\\n", (char*)&retError);
-	exit( EXIT_FAILURE);
-}
-
 int main(int argc, char *argv[])
 {
-	XEvent                event;
-	XSetWindowAttributes  swa;
-	int                   swaMask;
 	int                   c;
 
 	load_all_blobs;
 
-	display = XOpenDisplay(NULL);
-	if (display == NULL) {
-                printf( "Unable to open a connection to the X server\\n" );
-		exit( EXIT_FAILURE );
-	}
+        if (SDL_Init(SDL_INIT_VIDEO) < 0)
+            exit( EXIT_FAILURE );
 
-	XSetErrorHandler(xerrorhandler);
+        xWin = SDL_CreateWindow("Hello World!", 0, 0, wwidth_0, wheight_0, SDL_WINDOW_OPENGL);
+        if (xWin == NULL) {
+            SDL_Quit();
+            exit( EXIT_FAILURE );
+        }
+/*
+ * quickies now
+ */
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
+        SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 
-	swa.event_mask = StructureNotifyMask;
-	swaMask = CWEventMask;
-
-	xWin = XCreateWindow(display, XRootWindow(display,DefaultScreen(display)), 0, 0, wwidth_0, wheight_0,
-		0, DefaultDepth(display,DefaultScreen(display)), InputOutput, DefaultVisual(display,DefaultScreen(display)),
-		swaMask, &swa);
-
-	XMapWindow(display, xWin);
-	XIfEvent(display, &event, WaitForNotify, (XPointer) xWin);
-
+        ctx = SDL_GL_CreateContext(xWin);
+        glewExperimental = GL_TRUE;
+        glewInit();
+/****/
 	/*
 	* Setup done. Now go to the trace.
 	*/
@@ -114,10 +102,9 @@ int main(int argc, char *argv[])
 		pthread_join(tid[c], NULL);	
 	}
 
-	XDestroyWindow(display, xWin);
-	XCloseDisplay(display);
-	free_all_blobs;
-	exit( EXIT_SUCCESS );
+    SDL_Quit();
+    free_all_blobs;
+    exit( EXIT_SUCCESS );
 
 	(void)argc;
 	(void)argv;
@@ -126,8 +113,8 @@ int main(int argc, char *argv[])
 
     MakefileString="""CC = gcc
 
-CFLAGS=$(shell pkg-config --cflags gl x11 glu) -Wall -ansi -O0 --std=c99
-LIBS=$(shell pkg-config --libs gl x11 glu) -lpthread
+CFLAGS=$(shell pkg-config --cflags gl sdl glu) -Wall -ansi -O0 --std=c99
+LIBS=$(shell pkg-config --libs gl sdl glu) -lpthread
 
 SRCS=$(wildcard *.c)
 OBJS=$(SRCS:.c=.o)
@@ -149,20 +136,19 @@ clean:
 #define GL3_PROTOTYPES 1
 
 
-
-
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
 #include <GL/gl.h>
 #include <GL/glx.h>
 #include <GL/glu.h>
-#include <GL/glext.h>
+#include <GL/glew.h>
+#include <SDL2/SDL.h>
 #include <semaphore.h>
 
-extern Display *display;
-extern GLXContext context;
-extern Window xWin;
+extern SDL_Surface *display;
+extern SDL_GLContext ctx;
+extern SDL_Window *xWin;
 
 extern sem_t lock[];
 
@@ -184,6 +170,7 @@ void frame_0();
 
 
 """
+
 
     def SetupWriteout(self):
         global IncludeFilePointer, DataFilePointer
@@ -212,6 +199,9 @@ void frame_0();
 
     def HandleSpecialCalls(self,  call,  IncludeFilePointer,  DataFilePointer,  arraycounter):
         rVal = 0
+        if "SwapBuffers" in call.name:
+            call.name = "SDL_GL_SwapWindow"
+            
         if "glXChooseFBConfig" in call.name:
             for i in range(0, len(call.returnValue[0])):
                 IncludeFilePointer.write("#define config_" + format(call.returnValue[0][i][0], '08x') + " (_array_" + str(arraycounter) + "_p[" + str(i) + "])\n")
@@ -249,23 +239,24 @@ void frame_0();
             call.returnValue = (strstr+ctxName,  "TYPE_OPAQUE")
 
             
-            IncludeFilePointer.write("extern GLXContext " + ctxName + ";\n")
-            DataFilePointer.write("GLXContext " + ctxName + ";\n")
+            IncludeFilePointer.write("extern SDL_GLContext " + ctxName + ";\n")
+            DataFilePointer.write("SDL_GLContext " + ctxName + ";\n")
         elif "glXCreateContext" in call.name:
+            call.name = "SDL_GL_CreateContext"
             p = call.paramValues[1][0][0][0][0][0][0]
             call.paramValues[1] = (str("vis_" + format(p, '08x')),  "TYPE_OPAQUE")
             p = call.returnValue[0]
             ctxName = str("context_" + format(p, '08x'))
             call.returnValue = (ctxName,  "TYPE_OPAQUE")
-            IncludeFilePointer.write("extern GLXContext " + ctxName + ";\n")
-            DataFilePointer.write("GLXContext " + ctxName + ";\n")
+            IncludeFilePointer.write("extern SDL_GLContext " + ctxName + ";\n")
+            DataFilePointer.write("SDL_GLContext " + ctxName + ";\n")
 
         if "glXCreateNewContext" in call.name:
             p = call.returnValue[0]
             ctxName = str("context_" + format(p, '08x'))
             call.returnValue = (ctxName,  "TYPE_OPAQUE")
-            IncludeFilePointer.write("extern GLXContext " + ctxName + ";\n")
-            DataFilePointer.write("GLXContext " + ctxName + ";\n")
+            IncludeFilePointer.write("extern SDL_GLContext " + ctxName + ";\n")
+            DataFilePointer.write("SDL_GLContext " + ctxName + ";\n")
             p = call.paramValues[1][0]
             call.paramValues[1] = (str("config_" + format(p, '08x')),  "TYPE_OPAQUE")
             if call.paramValues[3][1] != "TYPE_NULL":
@@ -281,10 +272,12 @@ void frame_0();
 
         if "glXMakeCurrent" in call.name:
             p = call.paramValues[2][0]
+            call.name = "SDL_GL_MakeCurrent"
             if "NULL" not in str(p):
                 call.paramValues[2] = (str("context_" + format(p, '08x')),  "TYPE_OPAQUE")
 
         if "glXDestroyContext" in call.name:
+            call.name = "SDL_GL_DeleteContext"
             p = call.paramValues[1][0]
             if "NULL" not in str(p):
                 call.paramValues[1] = (str("context_" + format(p, '08x')),  "TYPE_OPAQUE")

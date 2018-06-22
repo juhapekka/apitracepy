@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 # -*- coding: iso-8859-1 -*-
 
 """*************************************************************************
@@ -90,7 +90,7 @@ class cTraceFile:
             self.container += 1
             self.mem = snappy.uncompress(compressedMem)
             self.containerPointer = 0
-        rval= ord(self.mem[self.containerPointer])
+        rval= ord(self.mem[self.containerPointer:self.containerPointer+1])
         self.containerPointer += 1
         self.fullFilePosition += 1
         return rval
@@ -115,9 +115,9 @@ class cTraceFile:
         return res
 
     def floatReader(self,  size,  type):
-        buf = ""
+        buf = bytearray()
         for i in range(0, size):
-            buf += chr(self.getByte())
+            buf.append( self.getByte())
         return float(struct.unpack(type, buf)[0])
 
     def sintReader(self):
@@ -274,7 +274,7 @@ class cTraceFile:
         self.mem = self.traceFile.read(2)
         self.filePointer += 2
 
-        if str(self.mem).startswith('at') != True:
+        if self.mem[0:2] != b'at':
             raise Exception("not snappy file!")
 
         length = int(struct.unpack('I', self.traceFile.read(4))[0])
