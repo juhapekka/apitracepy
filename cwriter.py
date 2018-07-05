@@ -28,12 +28,19 @@
 
 import sys
 import hashlib
-import string
 from apitrace import cTraceFile,  cTraceCall
-IncludeFilePointer = None
-DataFilePointer = None
-currentlyWritingFile = None
-currentFrame = 0
+#IncludeFilePointer = None
+#DataFilePointer = None
+#currentlyWritingFile = None
+#currentFrame = 0
+#arraycounter = 0
+#
+#writtenBlobs = []
+#screensizes = []
+
+from globals import globals
+glob = globals()
+
 from cwriterglx import glxSpecial
 try:
     from cwritersdl2 import sdl2Special
@@ -41,32 +48,26 @@ except Exception as ex:
     template = "An exception of type {0} occured. Arguments:\n{1!r}"
     message = template.format(type(ex).__name__, ex.args)
     print (message)
-arraycounter = 0
-
-writtenBlobs = []
-screensizes = []
 
 def newFile():
-    global currentlyWritingFile, currentFrame 
-    if currentlyWritingFile != None:
+    if glob.currentlyWritingFile != None:
         return False
 
-    filename = str("frame_"+str(currentFrame)+".c")
-    currentlyWritingFile = open(filename,  "w")
-    currentlyWritingFile.truncate()
+    filename = str("frame_"+str(glob.currentFrame)+".c")
+    glob.currentlyWritingFile = open(filename,  "w")
+    glob.currentlyWritingFile.truncate()
 
-    currentlyWritingFile.write(str("#include \"includes.h\"\n"))
-    currentlyWritingFile.write(str("void frame_"+str(currentFrame)+"(int thisthread) {\n"))
+    glob.currentlyWritingFile.write(str("#include \"includes.h\"\n"))
+    glob.currentlyWritingFile.write(str("void frame_"+str(glob.currentFrame)+"(int thisthread) {\n"))
     return True
 
 def closeFile():
-    global currentlyWritingFile
-    if currentlyWritingFile is None:
+    if glob.currentlyWritingFile is None:
         return
 
-    currentlyWritingFile.write(str("\t}\n}\n"))
-    currentlyWritingFile.close()
-    currentlyWritingFile = None
+    glob.currentlyWritingFile.write(str("\t}\n}\n"))
+    glob.currentlyWritingFile.close()
+    glob.currentlyWritingFile = None
 
 def printBlobName(blob):
     hashobject = hashlib.sha1(str.encode(blob))
@@ -75,39 +76,36 @@ def printBlobName(blob):
     return name_of_blob
     
 def writeoutBlob(blobName,  blobi):
-    global IncludeFilePointer, DataFilePointer
     blobFilePointer = open( blobName , "wb" )
     blobFilePointer.truncate()
     blobFilePointer.write(str.encode(blobi))
     blobFilePointer.close()
     blobFilePointer = None
-    if blobName not in writtenBlobs:
-        writtenBlobs.append(blobName)
+    if blobName not in glob.writtenBlobs:
+        glob.writtenBlobs.append(blobName)
 
 def writeoutMemoryMacro():
-    global IncludeFilePointer, DataFilePointer
+    for i in range(0, glob.currentFrame):
+        glob.IncludeFilePointer.write("void frame_" + str(i) +"(int);\n")
 
-    for i in range(0, currentFrame):
-        IncludeFilePointer.write("void frame_" + str(i) +"(int);\n")
+    glob.IncludeFilePointer.write("\n\n#define call_all_frames\\\n")
+    for i in range(0, glob.currentFrame):
+        glob.IncludeFilePointer.write("\tframe_" + str(i) +"(this_thread); \\\n")
+    glob.IncludeFilePointer.write("\n\n")
 
-    IncludeFilePointer.write("\n\n#define call_all_frames\\\n")
-    for i in range(0, currentFrame):
-        IncludeFilePointer.write("\tframe_" + str(i) +"(this_thread); \\\n")
-    IncludeFilePointer.write("\n\n")
-
-    for i in writtenBlobs:
+    for i in glob.writtenBlobs:
         if "blob" in i:
-            DataFilePointer.write(str("unsigned char *" + i + " = NULL;\n"))
-            IncludeFilePointer.write(str("extern unsigned char *" + i + ";\n"))
+            glob.DataFilePointer.write(str("unsigned char *" + i + " = NULL;\n"))
+            glob.IncludeFilePointer.write(str("extern unsigned char *" + i + ";\n"))
 
         if "dest" in i:
-            DataFilePointer.write(str("void* " + i + " = NULL;\n"))
-            IncludeFilePointer.write(str("extern void* " + i + ";\n"))
+            glob.DataFilePointer.write(str("void* " + i + " = NULL;\n"))
+            glob.IncludeFilePointer.write(str("extern void* " + i + ";\n"))
 
-    IncludeFilePointer.write("\n\n#define load_all_blobs\\\n")
-    for i in writtenBlobs:
+    glob.IncludeFilePointer.write("\n\n#define load_all_blobs\\\n")
+    for i in glob.writtenBlobs:
         if "blob" in i:
-            IncludeFilePointer.write(str("    " + i + " = (unsigned char*)LOADER(\"" + i + "\"); \\\n"))
+            glob.IncludeFilePointer.write(str("    " + i + " = (unsigned char*)LOADER(\"" + i + "\"); \\\n"))
 
         if "string" in i or "varyings" in i:
             additionalString = ""
@@ -116,90 +114,16 @@ def writeoutMemoryMacro():
                 additionalString = "_array_"+str(splitter[2])+"_p["+str(splitter[3])+"] = "
             strnum = int(i[i.rfind("_")+1:])
             strname = i[:i.rfind("_")]
-            IncludeFilePointer.write(str("    " + additionalString + strname + "_" + str(strnum) + " = LOADER(\"" + i + "\");\\\n"))
+            glob.IncludeFilePointer.write(str("    " + additionalString + strname + "_" + str(strnum) + " = LOADER(\"" + i + "\");\\\n"))
 
-    IncludeFilePointer.write(str("\n\n"))
+    glob.IncludeFilePointer.write(str("\n\n"))
 
-    IncludeFilePointer.write("\n\n#define free_all_blobs\\\n")
-    for i in writtenBlobs:
+    glob.IncludeFilePointer.write("\n\n#define free_all_blobs\\\n")
+    for i in glob.writtenBlobs:
         if "blob" in i:
-            IncludeFilePointer.write(str("    free(" + i + "); \\\n "))
+            glob.IncludeFilePointer.write(str("    free(" + i + "); \\\n "))
 
-    IncludeFilePointer.write(str("\n\n"))
-
-def handleArray_String(call, Value,  arrayindex):
-    global IncludeFilePointer, DataFilePointer, arraycounter
-
-    strname = "_string_"+ str(arraycounter) + "_" + str(arrayindex)
-
-    if strname not in writtenBlobs and strname!= "":
-        IncludeFilePointer.write("extern char* " + strname+ ";\n")
-        DataFilePointer.write("char* " + strname + ";\n")
-        writeoutBlob(strname,  Value)
-    return "NULL"
-
-def handleArray_Struct(Value):
-    global IncludeFilePointer, DataFilePointer, arraycounter
-    strname = "_struct_"+ str(arraycounter) + "_p"
-    arraycounter = arraycounter+1
-
-    structtext = "{"
-    structbreaker = ""
-    for i in range(0, len(Value)):
-        structtext += structbreaker
-        rval = str(format(Value[i][0][0], '08x'))
-        structtext += str("0x" + rval )
-        structbreaker = ", "
-
-    structtext += "};"
-    IncludeFilePointer.write("extern GLuint " + strname + "[];\n")
-    DataFilePointer.write("GLuint " + strname + "[] = " + structtext+ "\n")
-    return strname
-
-
-def handleArray(call,  index):
-    switches = {
-        "TYPE_STRING": lambda call, paramvalue, arrayindex : handleArray_String(call, paramvalue, arrayindex),
-        "TYPE_STRUCT": lambda call, paramvalue, arrayindex : handleArray_Struct(paramvalue),
-    }
-
-    global IncludeFilePointer, DataFilePointer,  arraycounter
-    returnnimi = "FAILED AT handleArray !!!"
-
-    if len(call.paramValues[index][0]) == 0:
-        return "NULL"
-
-    writeouttype = "GLuint"
-    arraytext = "{"
-    arraybreaker = ""
-    for i in range(0, len(call.paramValues[index][0])):
-        item = call.paramValues[index][0][i]
-        rVal = ""
-        arraytext += arraybreaker
-        try:
-            rVal = switches[item[1]](call, item[0], i)
-        except:
-            rVal = item[0]
-        if item[1] == "TYPE_STRING":
-            writeouttype = "char*"
-        if item[1] == "TYPE_FLOAT":
-            writeouttype = "float"
-            if str("inf") in str(rVal):
-                rVal = string.replace(str(rVal), "inf", "INFINITY")
-        if item[1] == "TYPE_DOUBLE":
-            writeouttype = "double"
-            if str("inf") in str(rVal):
-                rVal = string.replace(str(rVal), "inf", "INFINITY")
-
-        arraytext += str(rVal)
-        arraybreaker = ", "
-    arraytext += "};"
-
-    returnnimi = "_array_" + str(arraycounter) + "_p"
-    IncludeFilePointer.write("extern " + writeouttype + " " + returnnimi + "[];\n")
-    DataFilePointer.write(writeouttype + " " + returnnimi + "[] = " + arraytext+ "\n")
-    arraycounter = arraycounter+1
-    return returnnimi
+    glob.IncludeFilePointer.write(str("\n\n"))
 
 def handleResources(call):
     nimi = ""
@@ -209,29 +133,28 @@ def handleResources(call):
         if "NULL" not in str(p) and str(p).isdigit() == True:
             nimi = str("dest_" + format(p, '08x'))
             call.returnValue = (nimi, "TYPE_OPAQUE")
-            if nimi not in writtenBlobs and nimi != "":
-                writtenBlobs.append(nimi)
+            if nimi not in glob.writtenBlobs and nimi != "":
+                glob.writtenBlobs.append(nimi)
 
     return
 
 def specialCalls(call):
-    global arraycounter
     if "glViewport" in call.name:
         th = call.threadID
 
-        a = [item for item in screensizes if item[0] == th]
+        a = [item for item in glob.screensizes if item[0] == th]
         if len(a) == 0:
             a = (th, (0, 0))
-            screensizes.append(a)
+            glob.screensizes.append(a)
         else:
             a = a[0]
         
         if a[1][0] <= call.paramValues[2][0]:
             a = (th, (call.paramValues[2][0], call.paramValues[3][0]))
 
-            for i in range(0,  len(screensizes)):
-                if screensizes[i][0] is th:
-                    screensizes[i] = a
+            for i in range(0,  len(glob.screensizes)):
+                if glob.screensizes[i][0] is th:
+                    glob.screensizes[i] = a
         return
 
 #    p_list_changeling = [ ["glVertexAttribPointer", 5, "(const GLvoid*) "],
@@ -253,10 +176,10 @@ def specialCalls(call):
         if i[0] == call.name:
             rValString = i[1] + str(call.returnValue[0])
             call.returnValue = (rValString, "TYPE_OPAQUE")
-            if rValString not in writtenBlobs and rValString != "":
-                writtenBlobs.append(rValString)
-                IncludeFilePointer.write("extern " + i[2]+ " " + rValString + ";\n")
-                DataFilePointer.write(i[2]+ " " + rValString + ";\n")
+            if rValString not in glob.writtenBlobs and rValString != "":
+                glob.writtenBlobs.append(rValString)
+                glob.IncludeFilePointer.write("extern " + i[2]+ " " + rValString + ";\n")
+                glob.DataFilePointer.write(i[2]+ " " + rValString + ";\n")
 
     ignorecalls = ["glDeleteSync", "glDeleteShader",  "glDeleteProgram"]
     
@@ -265,22 +188,22 @@ def specialCalls(call):
             return
         elif call.name.endswith("Lists"):
             if call.name.startswith("glGen"):
-                nimi = "lista_" + str(arraycounter)
-                DataFilePointer.write( "GLuint " + nimi + ";\n")
-                IncludeFilePointer.write("extern GLuint " + nimi + ";\n")
+                nimi = "lista_" + str(glob.arraycounter)
+                glob.DataFilePointer.write( "GLuint " + nimi + ";\n")
+                glob.IncludeFilePointer.write("extern GLuint " + nimi + ";\n")
                 basevalue = int(call.returnValue[0])
                 for i in range (0, int(call.paramValues[0][0])):
                     nimi2 = "list_" + str(basevalue+i)
-                    IncludeFilePointer.write("#define " + nimi2 + " " + nimi + "+" + str(i) + "\n")
+                    glob.IncludeFilePointer.write("#define " + nimi2 + " " + nimi + "+" + str(i) + "\n")
                 call.returnValue = (str(nimi), "TYPE_OPAQUE")
-                arraycounter = arraycounter+1
+                glob.arraycounter = glob.arraycounter+1
         else:
             counter = call.paramValues[0][0]
             for i in range(0, counter):
                 valString = call.paramNames[1] + "_" + str(call.paramValues[1][0][i][0])
-                if valString not in writtenBlobs and valString != "":
-                    writtenBlobs.append(valString)
-                    IncludeFilePointer.write("#define " +valString+ " " + str("_array_"+ str(arraycounter) + "_p[") + str(i) + "]\n")
+                if valString not in glob.writtenBlobs and valString != "":
+                    glob.writtenBlobs.append(valString)
+                    glob.IncludeFilePointer.write("#define " +valString+ " " + str("_array_"+ str(glob.arraycounter) + "_p[") + str(i) + "]\n")
         return
 
     specialParamNames = [("program", "programs_"),
@@ -295,15 +218,15 @@ def specialCalls(call):
         for j in specialParamNames:
             if str(call.paramNames[i]) == str(j[0]):
                 paramfullname = str(j[1]) + str(call.paramValues[i][0])
-                if paramfullname not in writtenBlobs:
-                    writtenBlobs.append(paramfullname)
-                    IncludeFilePointer.write("#define " + paramfullname + " " + str(call.paramValues[i][0]) + "\n")
+                if paramfullname not in glob.writtenBlobs:
+                    glob.writtenBlobs.append(paramfullname)
+                    glob.IncludeFilePointer.write("#define " + paramfullname + " " + str(call.paramValues[i][0]) + "\n")
                 call.paramValues[i] =  (paramfullname, "TYPE_OPAQUE")
 
 def outputSpecialParams():
-    for i in range(0,  len(screensizes)):
-        IncludeFilePointer.write("#define wwidth_" + str(screensizes[i][0]) + " "  + str(screensizes[i][1][0]) + "\n")
-        IncludeFilePointer.write("#define wheight_" + str(screensizes[i][0]) + " "  + str(screensizes[i][1][1]) + "\n")
+    for i in range(0,  len(glob.screensizes)):
+        glob.IncludeFilePointer.write("#define wwidth_" + str(glob.screensizes[i][0]) + " "  + str(glob.screensizes[i][1][0]) + "\n")
+        glob.IncludeFilePointer.write("#define wheight_" + str(glob.screensizes[i][0]) + " "  + str(glob.screensizes[i][1][1]) + "\n")
 
 def commentoutCall(call):
     listOfCallsToIgnore = ["glXSwapIntervalMESA", "glReadPixels"]
@@ -313,10 +236,7 @@ def commentoutCall(call):
 ##
 # startup
 def main():
-    global currentlyWritingFile, currentFrame
-    global IncludeFilePointer, DataFilePointer
-    global arraycounter
-    currentlyWritingFile = None
+    glob.currentlyWritingFile = None
     lastThread = -1
     maxThread = 0
     useSDL2 = 0
@@ -353,11 +273,12 @@ def main():
                         setupwriter = sdl2Special()
                     else:
                         setupwriter = glxSpecial()
+                    setupwriter.glob = glob
 
-                    IncludeFilePointer, DataFilePointer = setupwriter.SetupWriteout()
-                    arraycounter += setupwriter.HandleSpecialCalls(returnedcall, IncludeFilePointer, DataFilePointer,  arraycounter)
+                    setupwriter.SetupWriteout()
+                    glob.arraycounter += setupwriter.HandleSpecialCalls(returnedcall)
             else:
-                arraycounter += setupwriter.HandleSpecialCalls(returnedcall, IncludeFilePointer, DataFilePointer,  arraycounter)
+                glob.arraycounter += setupwriter.HandleSpecialCalls(returnedcall)
 
 #        except Exception as ex:
 #            template = "An exception of type {0} occured. Arguments:\n{1!r}"
@@ -369,14 +290,14 @@ def main():
             closeFile()
             print ("last given call",  currentTrace.nextCallNumber)
 
-            IncludeFilePointer.write("#define max_thread " + str(maxThread+1) + "\n\n")
+            glob.IncludeFilePointer.write("#define max_thread " + str(maxThread+1) + "\n\n")
             outputSpecialParams()
 
             writeoutMemoryMacro()
-            IncludeFilePointer.close()
-            IncludeFilePointer = None
-            DataFilePointer.close()
-            DataFilePointer = None
+            glob.IncludeFilePointer.close()
+            glob.IncludeFilePointer = None
+            glob.DataFilePointer.close()
+            glob.DataFilePointer = None
             break
 
         if lastThread != returnedcall.threadID:
@@ -384,10 +305,10 @@ def main():
                 maxThread = returnedcall.threadID
 
             if wasFirstCall == False:
-                currentlyWritingFile.write("\t\tsem_post(&lock["+ str(returnedcall.threadID) +"]);\n\t\tsem_wait(&lock["+ str(lastThread) +"]);\n")
-                currentlyWritingFile.write("\t}\n\n")
+                glob.currentlyWritingFile.write("\t\tsem_post(&lock["+ str(returnedcall.threadID) +"]);\n\t\tsem_wait(&lock["+ str(lastThread) +"]);\n")
+                glob.currentlyWritingFile.write("\t}\n\n")
 
-            currentlyWritingFile.write("\tif(thisthread == " + str(returnedcall.threadID) + ") {\n")
+            glob.currentlyWritingFile.write("\tif(thisthread == " + str(returnedcall.threadID) + ") {\n")
             lastThread = returnedcall.threadID
 
         if returnedcall.CALL_FLAG_NO_SIDE_EFFECTS == False:
@@ -405,12 +326,12 @@ def main():
 
                     if returnedcall.paramValues[i][1] == "TYPE_BLOB":
                         bname = printBlobName(returnedcall.paramValues[i][0])
-                        if bname not in writtenBlobs:
+                        if bname not in glob.writtenBlobs:
                             writeoutBlob(bname,  returnedcall.paramValues[i][0])
                         paramlist += str(bname)
                     else:
                         if returnedcall.paramValues[i][1] == "TYPE_ARRAY":
-                            paramlist += handleArray(returnedcall,  i)
+                            paramlist += setupwriter.handleArray(returnedcall,  i)
                         elif returnedcall.paramValues[i][1] == "TYPE_STRING":
                             paramlist += "\"" + str(returnedcall.paramValues[i][0]) + "\""
                         elif returnedcall.paramValues[i][1] == "TYPE_FLOAT" or returnedcall.paramValues[i][1] == "TYPE_DOUBLE":
@@ -423,26 +344,26 @@ def main():
             paramlist += ")"
 
             if commentoutCall(returnedcall) is True:
-                currentlyWritingFile.write("//")
+                glob.currentlyWritingFile.write("//")
 
-            currentlyWritingFile.write("\t\t")
+            glob.currentlyWritingFile.write("\t\t")
 
             i = currentTrace.filePointer*20/currentTrace.fileSize
             sys.stdout.write('\r')
             if returnedcall.callNumber % 40 == 0:
-                sys.stdout.write("[%-20s] %d%% Current Frame: %d" % ('#'*int(i), 5*int(i),  currentFrame))
+                sys.stdout.write("[%-20s] %d%% Current Frame: %d" % ('#'*int(i), 5*int(i),  glob.currentFrame))
                 sys.stdout.flush()
 
             if returnedcall.returnValue != None and returnedcall.returnValue[1] == "TYPE_OPAQUE":
-                currentlyWritingFile.write(str(returnedcall.returnValue[0]) + " = ")
+                glob.currentlyWritingFile.write(str(returnedcall.returnValue[0]) + " = ")
 
-            currentlyWritingFile.write(str(returnedcall.name + paramlist+";\n"))
-            currentlyWritingFile.flush()
+            glob.currentlyWritingFile.write(str(returnedcall.name + paramlist+";\n"))
+            glob.currentlyWritingFile.flush()
 
 
         if setupwriter.framebreak in returnedcall.name:
             closeFile()
-            currentFrame = currentFrame+1
+            glob.currentFrame = glob.currentFrame+1
             lastThread = -1
 
         returnedcall = None
