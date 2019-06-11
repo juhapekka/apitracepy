@@ -340,7 +340,7 @@ extern sem_t lock[];
             arraytext += arraybreaker
             try:
                 rVal = switches[item[1]](call, item[0], i)
-                self.glob.arraycounter = self.glob.arraycounter+1
+                self.glob.arraycounter = self.glob.arraycounter #+1
             except:
                 rVal = item[0]
             if item[1] == "TYPE_STRING":

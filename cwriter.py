@@ -70,7 +70,7 @@ def closeFile():
     glob.currentlyWritingFile = None
 
 def printBlobName(blob):
-    hashobject = hashlib.sha1(str.encode(blob))
+    hashobject = hashlib.sha1(str(blob))
     hexdigit = hashobject.hexdigest()
     name_of_blob = "_blob_" + str(hexdigit) + "_" + str(len(blob))
     return name_of_blob
@@ -78,7 +78,7 @@ def printBlobName(blob):
 def writeoutBlob(blobName,  blobi):
     blobFilePointer = open( blobName , "wb" )
     blobFilePointer.truncate()
-    blobFilePointer.write(str.encode(blobi))
+    blobFilePointer.write(blobi)
     blobFilePointer.close()
     blobFilePointer = None
     if blobName not in glob.writtenBlobs:
@@ -111,7 +111,7 @@ def writeoutMemoryMacro():
             additionalString = ""
             splitter =  i.split("_")
             if splitter[1] == "string" and len(splitter) == 4:
-                additionalString = "_array_"+str(splitter[2])+"_p["+str(splitter[3])+"] = "
+                additionalString = "_array_"+str(int(splitter[2]))+"_p["+str(splitter[3])+"] = "
             strnum = int(i[i.rfind("_")+1:])
             strname = i[:i.rfind("_")]
             glob.IncludeFilePointer.write(str("    " + additionalString + strname + "_" + str(strnum) + " = LOADER(\"" + i + "\");\\\n"))
